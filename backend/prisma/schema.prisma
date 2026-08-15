@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+}
+
+generator json {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  phone         String   @unique
+  firebaseUid   String   @unique
+  phoneVerified Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  profile       Profile?
+  photos        Photo[]
+  swipesGiven   Swipe[]  @relation("SwipesGiven")
+  swipesReceived Swipe[] @relation("SwipesReceived")
+  matchesA      Match[]  @relation("MatchUser1")
+  matchesB      Match[]  @relation("MatchUser2")
+  messages      Message[]
+}
+
+model Profile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  dob         DateTime
+  gender      String
+  bio         String?
+  interestedIn String[] // e.g. ["male","female"]
+  minAge      Int      @default(18)
+  maxAge      Int      @default(99)
+  maxDistanceKm Int    @default(50)
+  // Store lat/lng directly; use raw SQL for PostGIS proximity queries
+  latitude    Float?
+  longitude   Float?
+  updatedAt   DateTime @updatedAt
+}
+
+model Photo {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  url        String
+  order      Int      @default(0)
+  isVerified Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+enum SwipeAction {
+  LIKE
+  PASS
+  SUPERLIKE
+}
+
+model Swipe {
+  id         String      @id @default(uuid())
+  swiperId   String
+  swiper     User        @relation("SwipesGiven", fields: [swiperId], references: [id], onDelete: Cascade)
+  swipedId   String
+  swiped     User        @relation("SwipesReceived", fields: [swipedId], references: [id], onDelete: Cascade)
+  action     SwipeAction
+  createdAt  DateTime    @default(now())
+
+  @@unique([swiperId, swipedId])
+}
+
+model Match {
+  id        String    @id @default(uuid())
+  user1Id   String
+  user1     User      @relation("MatchUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2Id   String
+  user2     User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  matchedAt DateTime  @default(now())
+  messages  Message[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  matchId   String
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content   String
+  sentAt    DateTime @default(now())
+  readAt    DateTime?
+}
