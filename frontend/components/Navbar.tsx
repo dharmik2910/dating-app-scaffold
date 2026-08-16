@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { IconFlame, IconCompass, IconHeart, IconUser, IconLogout } from '@tabler/icons-react';
+import { IconFlame, IconCompass, IconHeart, IconUser, IconLogout, IconMessages } from '@tabler/icons-react';
 import { useAuth } from '@/components/AuthContext';
 
 type NavbarProps = {
@@ -32,6 +32,11 @@ export default function Navbar({ user: propUser }: NavbarProps) {
       icon: IconHeart,
     },
     {
+      name: 'Chats',
+      href: '/chat',
+      icon: IconMessages,
+    },
+    {
       name: 'Profile',
       href: '/profile',
       icon: IconUser,
@@ -42,7 +47,7 @@ export default function Navbar({ user: propUser }: NavbarProps) {
     <>
       {/* Top Navbar */}
       <header className="sticky top-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
+        <div className="flex h-16 w-full items-center justify-between px-4 sm:px-8">
           <Link href="/discover" className="flex items-center gap-2 group">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-ember to-rose-400 text-white shadow-lg shadow-ember/20 group-hover:scale-105 transition-transform">
               <IconFlame size={22} className="fill-white stroke-white" />
@@ -52,8 +57,8 @@ export default function Navbar({ user: propUser }: NavbarProps) {
             </span>
           </Link>
 
-          {/* Desktop Nav Links */}
-          <nav className="hidden md:flex items-center space-x-1">
+          {/* Desktop Nav Links (Large screens lg and up) */}
+          <nav className="hidden lg:flex items-center space-x-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname.startsWith(item.href);
@@ -61,11 +66,10 @@ export default function Navbar({ user: propUser }: NavbarProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                    isActive
+                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive
                       ? 'bg-neutral-800 text-white shadow-sm'
                       : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
-                  }`}
+                    }`}
                 >
                   <Icon size={18} className={isActive ? 'text-ember' : 'text-neutral-400'} />
                   <span>{item.name}</span>
@@ -93,8 +97,9 @@ export default function Navbar({ user: propUser }: NavbarProps) {
         </div>
       </header>
 
-      {/* Mobile Bottom Navigation Bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/90 backdrop-blur-lg px-6 py-2">
+      {/* Mobile & Tablet Bottom Navigation Bar (Shown up to lg screens) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/90 backdrop-blur-lg px-6 py-2">
+
         <div className="flex justify-around items-center">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -103,9 +108,8 @@ export default function Navbar({ user: propUser }: NavbarProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-col items-center py-1 px-3 rounded-xl transition-all ${
-                  isActive ? 'text-ember font-semibold' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
+                className={`flex flex-col items-center py-1 px-3 rounded-xl transition-all ${isActive ? 'text-ember font-semibold' : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
               >
                 <Icon size={22} />
                 <span className="text-[10px] mt-1">{item.name}</span>
