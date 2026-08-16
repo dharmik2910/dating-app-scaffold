@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { IconMapPin, IconUser, IconSparkles, IconHeart, IconHeartFilled, IconLayoutGrid, IconGridDots, IconSquare, IconList } from '@tabler/icons-react';
 import { toast } from 'sonner';
+import DiscoverSkeleton from '@/components/DiscoverSkeleton';
 
 type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
 
@@ -48,6 +49,9 @@ function parseBioContent(rawBio?: string) {
 
 export default function DiscoverPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grid5');
 
@@ -60,13 +64,32 @@ export default function DiscoverPage() {
     api
       .getDiscovery()
       .then((data) => {
-        setCandidates(data);
+        const items = Array.isArray(data) ? data : data.items || [];
+        setCandidates(items);
+        setNextCursor(data.nextCursor || null);
+        setHasMore(Boolean(data.hasMore));
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
         setLoading(false);
       });
+  }
+
+  async function loadMoreCandidates() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await api.getDiscovery(nextCursor);
+      const items = Array.isArray(data) ? data : data.items || [];
+      setCandidates((prev) => [...prev, ...items]);
+      setNextCursor(data.nextCursor || null);
+      setHasMore(Boolean(data.hasMore));
+    } catch (err) {
+      console.error('Failed to load more candidates:', err);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function handleToggleLike(candidate: Candidate) {
@@ -131,10 +154,7 @@ export default function DiscoverPage() {
 
 
       {loading ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-20 gap-3">
-          <div className="w-8 h-8 border-2 border-ember border-t-transparent rounded-full animate-spin" />
-          <p className="text-neutral-400 text-sm font-medium">Loading registered member profiles...</p>
-        </div>
+        <DiscoverSkeleton viewMode={viewMode} />
       ) : candidates.length === 0 ? (
         <div className="flex-1 flex items-center justify-center py-20">
           <div className="text-center p-8 bg-neutral-900/60 border border-neutral-800 rounded-3xl max-w-sm">
@@ -158,12 +178,12 @@ export default function DiscoverPage() {
             viewMode === 'grid5'
               ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
               : viewMode === 'grid3'
-              ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
-              : viewMode === 'grid2'
-              ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
-              : viewMode === 'grid1'
-              ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-              : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
+                ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
+                : viewMode === 'grid2'
+                  ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
+                  : viewMode === 'grid1'
+                    ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
+                    : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
           }
         >
 
@@ -173,19 +193,17 @@ export default function DiscoverPage() {
             return (
               <div
                 key={candidate.userId}
-                className={`group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/40 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 ${
-                  viewMode === 'list'
+                className={`group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/40 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 ${viewMode === 'list'
                     ? 'flex flex-row items-center p-3 gap-4 w-full'
                     : 'flex flex-col w-full'
-                }`}
+                  }`}
               >
                 {/* Photo & Cover */}
                 <div
-                  className={`relative bg-neutral-800 overflow-hidden ${
-                    viewMode === 'list'
+                  className={`relative bg-neutral-800 overflow-hidden ${viewMode === 'list'
                       ? 'w-24 h-24 sm:w-28 sm:h-28 rounded-2xl flex-shrink-0'
                       : 'aspect-[3/4] w-full'
-                  }`}
+                    }`}
                 >
 
                   {candidate.photos?.[0]?.url ? (
@@ -212,8 +230,8 @@ export default function DiscoverPage() {
                     title={candidate.liked ? 'Matched! Click to unmatch' : 'Click heart to match'}
                     aria-label={`Match ${candidate.name}`}
                     className={`absolute top-3.5 right-3.5 z-20 transition-all duration-300 transform active:scale-90 cursor-pointer drop-shadow-md ${candidate.liked
-                        ? 'text-rose-500 opacity-100 scale-100 drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)]'
-                        : 'text-white/80 hover:text-rose-500 opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 hover:drop-shadow-[0_2px_10px_rgba(244,63,94,0.5)]'
+                      ? 'text-rose-500 opacity-100 scale-100 drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)]'
+                      : 'text-white/80 hover:text-rose-500 opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 hover:drop-shadow-[0_2px_10px_rgba(244,63,94,0.5)]'
                       }`}
                   >
                     {candidate.liked ? (
@@ -317,6 +335,18 @@ export default function DiscoverPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="mt-8 text-center">
+          <button
+            onClick={loadMoreCandidates}
+            disabled={loadingMore}
+            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-rose-500/50 text-neutral-200 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading profiles...' : 'Load More Profiles'}
+          </button>
         </div>
       )}
     </main>

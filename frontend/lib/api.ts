@@ -75,11 +75,29 @@ export const api = {
     request('/auth/verify', { method: 'POST', body: JSON.stringify({ idToken }) }),
   getMe: () => request('/users/me'),
   updateProfile: (data: unknown) => request('/users/me', { method: 'PUT', body: JSON.stringify(data) }),
-  getDiscovery: () => request('/discovery'),
+  getDiscovery: (cursor?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    return request(`/discovery${query ? `?${query}` : ''}`);
+  },
   swipe: (swipedId: string, action: 'LIKE' | 'PASS' | 'SUPERLIKE' | 'UNLIKE') =>
     request('/swipes', { method: 'POST', body: JSON.stringify({ swipedId, action }) }),
-  getMatches: () => request('/matches'),
-  getChatHistory: (matchId: string) => request(`/chat/${matchId}/history`),
+  getMatches: (cursor?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    return request(`/matches${query ? `?${query}` : ''}`);
+  },
+  getChatHistory: (matchId: string, cursor?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    return request(`/chat/${matchId}/history${query ? `?${query}` : ''}`);
+  },
   getPhotoUploadUrl: (contentType: string) =>
     request('/photos/upload-url', { method: 'POST', body: JSON.stringify({ contentType }) }),
   confirmPhotoUpload: (publicUrl: string, key: string, order?: number) =>

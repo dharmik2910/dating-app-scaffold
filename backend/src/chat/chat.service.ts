@@ -13,7 +13,25 @@ export class ChatService {
     return this.prisma.message.create({ data: { matchId, senderId, content } });
   }
 
-  getHistory(matchId: string) {
-    return this.prisma.message.findMany({ where: { matchId }, orderBy: { sentAt: 'asc' } });
+  async getHistory(matchId: string, cursor?: string, limitStr?: string) {
+    const limit = Math.min(Math.max(parseInt(limitStr || '25', 10) || 25, 1), 100);
+
+    const messages = await this.prisma.message.findMany({
+      where: { matchId },
+      orderBy: { sentAt: 'desc' },
+      take: limit + 1,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
+    });
+
+    const hasMore = messages.length > limit;
+    const items = hasMore ? messages.slice(0, limit) : messages;
+    const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].id : null;
+
+    return {
+      items: [...items].reverse(),
+      nextCursor,
+      hasMore,
+    };
   }
 }

@@ -5,12 +5,13 @@ import { PrismaService } from '../prisma/prisma.service';
 export class DiscoveryService {
   constructor(private prisma: PrismaService) { }
 
-  async getCandidates(userId: string, limit = 50) {
+  async getCandidates(userId: string, cursor?: string, limitStr?: string) {
+    const limit = Math.min(Math.max(parseInt(limitStr || '20', 10) || 20, 1), 50);
+
     const swiped = await this.prisma.swipe.findMany({
       where: { swiperId: userId },
       select: { swipedId: true, action: true },
     });
-    const swipedIds = swiped.map((s) => s.swipedId);
     const likedSet = new Set(
       swiped.filter((s) => s.action === 'LIKE' || s.action === 'SUPERLIKE').map((s) => s.swipedId)
     );
@@ -34,11 +35,17 @@ export class DiscoveryService {
           },
         },
       },
-      take: limit,
+      take: limit + 1,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip: cursor ? 1 : 0,
       orderBy: { updatedAt: 'desc' },
     });
 
-    return profiles.map((p) => {
+    const hasMore = profiles.length > limit;
+    const rawItems = hasMore ? profiles.slice(0, limit) : profiles;
+    const nextCursor = hasMore && rawItems.length > 0 ? rawItems[rawItems.length - 1].id : null;
+
+    const items = rawItems.map((p) => {
       let distanceKm = 0;
       if (meLat && meLng && p.latitude && p.longitude) {
         const radLat1 = (Math.PI * meLat) / 180;
@@ -56,6 +63,7 @@ export class DiscoveryService {
       }
 
       return {
+        id: p.id,
         userId: p.userId,
         name: p.name,
         bio: p.bio,
@@ -65,6 +73,12 @@ export class DiscoveryService {
         photos: p.user.photos || [],
       };
     });
+
+    return {
+      items,
+      nextCursor,
+      hasMore,
+    };
   }
 }
 

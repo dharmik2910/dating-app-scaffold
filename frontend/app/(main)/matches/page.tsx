@@ -5,14 +5,17 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { IconHeart, IconHeartFilled, IconMessageCircle, IconSparkles, IconUser, IconLayoutGrid, IconGridDots, IconSquare, IconList } from '@tabler/icons-react';
 import { toast } from 'sonner';
+import MatchesSkeleton from '@/components/MatchesSkeleton';
 
 type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
 
 export default function MatchesPage() {
   const [matches, setMatches] = useState<any[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grid5');
-
 
   useEffect(() => {
     fetchMatches();
@@ -23,13 +26,32 @@ export default function MatchesPage() {
     api
       .getMatches()
       .then((data) => {
-        setMatches(data);
+        const items = Array.isArray(data) ? data : data.items || [];
+        setMatches(items);
+        setNextCursor(data.nextCursor || null);
+        setHasMore(Boolean(data.hasMore));
         setLoading(false);
       })
       .catch((err) => {
         console.error(err);
         setLoading(false);
       });
+  }
+
+  async function loadMoreMatches() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await api.getMatches(nextCursor);
+      const items = Array.isArray(data) ? data : data.items || [];
+      setMatches((prev) => [...prev, ...items]);
+      setNextCursor(data.nextCursor || null);
+      setHasMore(Boolean(data.hasMore));
+    } catch (err) {
+      console.error('Failed to load more matches:', err);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function handleUnmatch(matchId: string, otherUserId: string, otherName?: string) {
@@ -88,10 +110,7 @@ export default function MatchesPage() {
 
 
       {loading ? (
-        <div className="flex-1 flex flex-col justify-center items-center py-20 gap-3">
-          <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-neutral-400">Loading your matches...</p>
-        </div>
+        <MatchesSkeleton viewMode={viewMode} />
       ) : matches.length > 0 ? (
         /* Dynamic Grid/List Matches Container */
         <div
@@ -242,6 +261,18 @@ export default function MatchesPage() {
               Discover Candidates
             </Link>
           </div>
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="mt-8 text-center">
+          <button
+            onClick={loadMoreMatches}
+            disabled={loadingMore}
+            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-rose-500/50 text-neutral-200 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading matches...' : 'Load More Matches'}
+          </button>
         </div>
       )}
     </main>
