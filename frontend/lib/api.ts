@@ -71,6 +71,10 @@ async function compressImage(file: File, maxWidth = 1200, quality = 0.82): Promi
 }
 
 export const api = {
+  sendWhatsappOtp: (phone: string) =>
+    request('/auth/send-whatsapp-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
+  verifyWhatsappOtp: (phone: string, code: string) =>
+    request('/auth/verify-whatsapp-otp', { method: 'POST', body: JSON.stringify({ phone, code }) }),
   verifyFirebaseToken: (idToken: string) =>
     request('/auth/verify', { method: 'POST', body: JSON.stringify({ idToken }) }),
   getMe: () => request('/users/me'),

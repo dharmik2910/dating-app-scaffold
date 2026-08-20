@@ -4,7 +4,7 @@ import { VerifyFirebaseTokenDto } from './dto/verify-token.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   // Client signs in with Firebase Phone Auth (sends its own OTP SMS),
   // then sends us the resulting Firebase ID token to exchange for our app JWTs.

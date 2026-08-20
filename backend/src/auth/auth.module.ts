@@ -16,4 +16,4 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
   providers: [AuthService, FirebaseService, JwtAuthGuard],
   exports: [JwtModule, JwtAuthGuard],
 })
-export class AuthModule {}
+export class AuthModule { }

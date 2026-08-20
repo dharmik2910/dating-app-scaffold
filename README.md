@@ -11,16 +11,6 @@ backend/    NestJS API (auth, users, photos, discovery, swipes, matches, chat)
 frontend/   Next.js App Router (login, discover, matches, chat)
 ```
 
-## Backend setup
-
-```bash
-cd backend
-npm install
-cp .env.example .env    # fill in DATABASE_URL, Firebase Admin creds, AWS S3 creds
-npx prisma migrate dev --name init
-npm run start:dev       # http://localhost:3001
-```
-
 Firebase Admin credentials come from your Firebase project's service account
 (Project Settings → Service Accounts → Generate new private key).
 
@@ -28,13 +18,31 @@ AWS S3 credentials come from IAM (create a user with `s3:PutObject`,
 `s3:DeleteObject`, and `s3:GetObject` on your bucket). `AWS_S3_PUBLIC_URL` is
 your bucket's public URL via CloudFront or bucket public access.
 
+## Backend setup
+
+```bash
+cd backend
+npm install
+cp .env.example .env    # fill in DATABASE_URL, Firebase Admin creds, AWS S3 creds
+npx prisma migrate dev --name init
+npm run start:dev      
+```
+
 ## Frontend setup
 
 ```bash
 cd frontend
 npm install
 cp .env.local.example .env.local   # fill in API URL + Firebase client config
-npm run dev              # http://localhost:3000
+npm run dev              
+```
+
+## Mobile App setup
+
+```bash
+cd mobile
+npm install
+npx expo start
 ```
 
 Firebase **client** config (different from the Admin SDK creds above) comes
