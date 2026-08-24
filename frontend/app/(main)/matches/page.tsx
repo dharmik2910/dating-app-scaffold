@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { IconHeart, IconHeartFilled, IconMessageCircle, IconSparkles, IconUser, IconLayoutGrid, IconGridDots, IconSquare, IconList } from '@tabler/icons-react';
+import { IconHeart, IconHeartFilled, IconMessageCircle, IconSparkles, IconUser, IconLayoutGrid, IconGridDots, IconSquare, IconList, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import MatchesSkeleton from '@/components/MatchesSkeleton';
 
@@ -16,6 +16,7 @@ export default function MatchesPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grid5');
+  const [cardPhotoIndexes, setCardPhotoIndexes] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchMatches();
@@ -36,6 +37,19 @@ export default function MatchesPage() {
         console.error(err);
         setLoading(false);
       });
+  }
+
+  function cycleMatchPhoto(matchId: string, totalPhotos: number, direction: 'next' | 'prev', e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setCardPhotoIndexes((prev) => {
+      const current = prev[matchId] || 0;
+      const nextIdx =
+        direction === 'next'
+          ? (current + 1) % totalPhotos
+          : (current - 1 + totalPhotos) % totalPhotos;
+      return { ...prev, [matchId]: nextIdx };
+    });
   }
 
   async function loadMoreMatches() {
@@ -118,17 +132,20 @@ export default function MatchesPage() {
             viewMode === 'grid5'
               ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
               : viewMode === 'grid3'
-              ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
-              : viewMode === 'grid2'
-              ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
-              : viewMode === 'grid1'
-              ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-              : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
+                ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
+                : viewMode === 'grid2'
+                  ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
+                  : viewMode === 'grid1'
+                    ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
+                    : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
           }
         >
 
           {matches.map((m) => {
             const targetUserId = m.otherUser?.userId || m.otherUser?.id || m.otherUserId;
+            const photosList = m.otherUser?.photos && m.otherUser.photos.length > 0 ? m.otherUser.photos : [];
+            const activePhotoIdx = cardPhotoIndexes[m.id] || 0;
+            const currentPhotoUrl = photosList[activePhotoIdx]?.url || photosList[0]?.url;
 
             return (
               <Link
@@ -148,12 +165,25 @@ export default function MatchesPage() {
                       : 'aspect-[3/4] w-full'
                   }`}
                 >
+                  {/* Photo Story Bars */}
+                  {photosList.length > 1 && viewMode !== 'list' && (
+                    <div className="absolute top-2.5 inset-x-3 flex gap-1 z-30 pointer-events-none">
+                      {photosList.map((_: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                            idx === activePhotoIdx ? 'bg-white shadow-md' : 'bg-white/35'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
 
-                  {m.otherUser?.photos?.[0]?.url ? (
+                  {currentPhotoUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={m.otherUser.photos[0].url}
-                      alt={m.otherUser.name || 'Match'}
+                      src={currentPhotoUrl}
+                      alt={m.otherUser?.name || 'Match'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   ) : (
@@ -162,6 +192,28 @@ export default function MatchesPage() {
                     </div>
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/30 to-transparent pointer-events-none" />
+
+                  {/* Left / Right Photo Arrows */}
+                  {photosList.length > 1 && viewMode !== 'list' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => cycleMatchPhoto(m.id, photosList.length, 'prev', e)}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        title="Previous photo"
+                      >
+                        <IconChevronLeft size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => cycleMatchPhoto(m.id, photosList.length, 'next', e)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        title="Next photo"
+                      >
+                        <IconChevronRight size={16} />
+                      </button>
+                    </>
+                  )}
 
                   {/* Interactive Heart Icon for Unmatching */}
                   <button
@@ -173,7 +225,9 @@ export default function MatchesPage() {
                     }}
                     title="Click heart to unmatch"
                     aria-label={`Unmatch ${m.otherUser?.name || 'user'}`}
-                    className="absolute top-3.5 right-3.5 z-20 text-rose-500 opacity-90 hover:opacity-100 hover:scale-110 active:scale-95 transition-all cursor-pointer drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)]"
+                    className={`absolute top-3.5 right-3.5 z-20 text-rose-500 opacity-90 hover:opacity-100 hover:scale-110 active:scale-95 transition-all cursor-pointer drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)] ${
+                      viewMode === 'list' ? 'hidden' : ''
+                    }`}
                   >
                     <IconHeartFilled size={26} className="hover:text-rose-400 transition-colors" />
                   </button>

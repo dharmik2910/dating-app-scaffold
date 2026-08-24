@@ -147,12 +147,12 @@ export default function ProfilePage() {
 
   const hasChanges = Boolean(
     initialDetails &&
-      (profile?.name !== initialDetails.name ||
-        (profile?.gender || 'MALE') !== initialDetails.gender ||
-        (profile?.preference || 'FEMALE') !== initialDetails.preference ||
-        cleanBioText !== initialDetails.bio ||
-        JSON.stringify([...selectedInterests].sort()) !==
-          JSON.stringify([...initialDetails.interests].sort()))
+    (profile?.name !== initialDetails.name ||
+      (profile?.gender || 'MALE') !== initialDetails.gender ||
+      (profile?.preference || 'FEMALE') !== initialDetails.preference ||
+      cleanBioText !== initialDetails.bio ||
+      JSON.stringify([...selectedInterests].sort()) !==
+      JSON.stringify([...initialDetails.interests].sort()))
   );
 
   async function handleSave(e: React.FormEvent) {
@@ -291,31 +291,28 @@ export default function ProfilePage() {
         {/* Completion Tips */}
         <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-neutral-400">
           <span
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${
-              photos.length >= 3
-                ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
-                : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
-            }`}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${photos.length >= 3
+              ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
+              : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
+              }`}
           >
             {photos.length >= 3 ? <IconCheck size={13} /> : null} 3+ Photos ({photos.length}/3)
           </span>
 
           <span
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${
-              cleanBioText.length > 10
-                ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
-                : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
-            }`}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${cleanBioText.length > 10
+              ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
+              : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
+              }`}
           >
             {cleanBioText.length > 10 ? <IconCheck size={13} /> : null} Detailed Bio
           </span>
 
           <span
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${
-              selectedInterests.length >= 3
-                ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
-                : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
-            }`}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border transition-colors ${selectedInterests.length >= 3
+              ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-400'
+              : 'border-neutral-800 bg-neutral-950/50 text-neutral-400'
+              }`}
           >
             {selectedInterests.length >= 3 ? <IconCheck size={13} /> : null} 3+ Passions ({selectedInterests.length}/3)
           </span>
@@ -402,9 +399,9 @@ export default function ProfilePage() {
               setProfile((prev) =>
                 prev
                   ? {
-                      ...prev,
-                      bio: formatBioWithInterests(e.target.value, selectedInterests),
-                    }
+                    ...prev,
+                    bio: formatBioWithInterests(e.target.value, selectedInterests),
+                  }
                   : null
               )
             }
@@ -438,11 +435,10 @@ export default function ProfilePage() {
                   key={interest.id}
                   type="button"
                   onClick={() => toggleInterest(interest.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-gradient-to-r from-rose-600 to-amber-600 border-rose-500 text-white shadow-md shadow-rose-950/40 scale-105'
-                      : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-white'
-                  }`}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all cursor-pointer ${isSelected
+                    ? 'bg-gradient-to-r from-rose-600 to-amber-600 border-rose-500 text-white shadow-md shadow-rose-950/40 scale-105'
+                    : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700 hover:text-white'
+                    }`}
                 >
                   {interest.label}
                 </button>

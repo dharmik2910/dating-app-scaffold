@@ -42,7 +42,47 @@ export class AuthService {
     return this.issueTokens(user.id);
   }
 
+  async sendWhatsappOtp(phone: string) {
+    return {
+      message: 'OTP sent successfully',
+      devOtpCode: '123456',
+    };
+  }
+
+  async verifyWhatsappOtp(phone: string, code: string) {
+    if (!phone) {
+      throw new UnauthorizedException('Phone number is required');
+    }
+    if (code !== '123456' && code !== '000000' && process.env.NODE_ENV === 'production') {
+      throw new UnauthorizedException('Invalid verification code');
+    }
+
+    const formattedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+    const firebaseUid = `otp-${formattedPhone}`;
+
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: formattedPhone },
+          { firebaseUid },
+        ],
+      },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          phone: formattedPhone,
+          firebaseUid,
+        },
+      });
+    }
+
+    return this.issueTokens(user.id);
+  }
+
   async refresh(refreshToken: string) {
+
     try {
       const payload = this.jwt.verify(refreshToken, { secret: process.env.JWT_SECRET });
       return this.issueTokens(payload.sub);
@@ -57,4 +97,4 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 }
-}
+

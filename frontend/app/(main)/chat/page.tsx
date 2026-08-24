@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/components/AuthContext';
@@ -41,6 +42,7 @@ const ICEBREAKERS = [
 ];
 
 export default function ConversationsPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +78,14 @@ export default function ConversationsPage() {
         console.error(err);
         setLoading(false);
       });
+  }
+
+  function handleMatchClick(match: any) {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      router.push(`/chat/${match.id}`);
+    } else {
+      selectMatchForChat(match);
+    }
   }
 
   function selectMatchForChat(match: any) {
@@ -215,7 +225,7 @@ export default function ConversationsPage() {
                 {matches.map((m) => (
                   <button
                     key={`story-${m.id}`}
-                    onClick={() => selectMatchForChat(m)}
+                    onClick={() => handleMatchClick(m)}
                     className="flex flex-col items-center gap-1 shrink-0 group text-left"
                   >
                     <div className={`relative w-12 h-12 rounded-full p-0.5 transition-all ${
@@ -271,7 +281,7 @@ export default function ConversationsPage() {
                   return (
                     <div
                       key={m.id}
-                      onClick={() => selectMatchForChat(m)}
+                      onClick={() => handleMatchClick(m)}
                       className={`group relative flex items-center gap-3 p-3 rounded-2xl cursor-pointer transition-all duration-200 border ${
                         isSelected
                           ? 'bg-gradient-to-r from-neutral-900 via-neutral-900 to-rose-950/40 border-rose-500/60 shadow-lg shadow-rose-950/20'
