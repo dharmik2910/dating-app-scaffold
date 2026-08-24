@@ -6,6 +6,7 @@ import { IconFlame, IconCompass, IconHeart, IconUser, IconLogout, IconMessages }
 import { useAuth } from '@/components/AuthContext';
 
 type NavbarProps = {
+
   user?: any;
 };
 
@@ -45,8 +46,8 @@ export default function Navbar({ user: propUser }: NavbarProps) {
 
   return (
     <>
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md">
+      {/* Top Navbar (Desktop only) */}
+      <header className="hidden lg:block sticky top-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md">
         <div className="flex h-16 w-full items-center justify-between px-4 sm:px-8">
           <Link href="/discover" className="flex items-center gap-2 group">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-ember to-rose-400 text-white shadow-lg shadow-ember/20 group-hover:scale-105 transition-transform">
@@ -67,8 +68,8 @@ export default function Navbar({ user: propUser }: NavbarProps) {
                   key={item.href}
                   href={item.href}
                   className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive
-                      ? 'bg-neutral-800 text-white shadow-sm'
-                      : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
+                    ? 'bg-neutral-800 text-white shadow-sm'
+                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
                     }`}
                 >
                   <Icon size={18} className={isActive ? 'text-ember' : 'text-neutral-400'} />

@@ -249,8 +249,8 @@ export default function DiscoverPage() {
                 key={candidate.userId}
                 onClick={() => openCandidateModal(candidate)}
                 className={`group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/50 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 cursor-pointer ${viewMode === 'list'
-                    ? 'flex flex-row items-center p-3 gap-4 w-full'
-                    : 'flex flex-col w-full'
+                  ? 'flex flex-row items-center p-3 gap-4 w-full'
+                  : 'flex flex-col w-full'
                   }`}
               >
                 {/* Photo & Cover */}
@@ -265,8 +265,8 @@ export default function DiscoverPage() {
                     )
                   }
                   className={`relative bg-neutral-800 overflow-hidden ${viewMode === 'list'
-                      ? 'w-24 h-24 sm:w-28 sm:h-28 rounded-2xl flex-shrink-0'
-                      : 'aspect-[3/4] w-full'
+                    ? 'w-24 h-24 sm:w-28 sm:h-28 rounded-2xl flex-shrink-0'
+                    : 'aspect-[3/4] w-full'
                     }`}
                 >
                   {/* Photo Story Progress Bars */}
@@ -460,8 +460,8 @@ export default function DiscoverPage() {
         const currentPhotoUrl = photosList[Math.min(currentPhotoIndex, photosList.length - 1)]?.url;
 
         return (
-          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-lg flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-            <div className="relative w-full max-w-3xl bg-neutral-900/95 border border-neutral-800/90 rounded-3xl overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] my-auto flex flex-col md:flex-row h-[520px] max-h-[90vh]">
+          <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-lg flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+            <div className="relative w-full max-w-3xl bg-neutral-900/95 border border-neutral-800/90 rounded-3xl overflow-y-auto md:overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] my-auto flex flex-col md:flex-row max-h-[85vh] sm:max-h-[90vh] md:h-[540px]">
               
               {/* Close Button */}
               <button
@@ -472,7 +472,7 @@ export default function DiscoverPage() {
                 <IconX size={20} />
               </button>
 
-              {/* LEFT COLUMN: Fixed Aspect Ratio Photo Gallery */}
+              {/* LEFT COLUMN: Photo Gallery (Preserving original 3:4 aspect ratio) */}
               <div
                 onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
                 onTouchEnd={(e) =>
@@ -483,7 +483,7 @@ export default function DiscoverPage() {
                     () => setCurrentPhotoIndex((prev) => (prev > 0 ? prev - 1 : photosList.length - 1))
                   )
                 }
-                className="relative w-full md:w-1/2 aspect-[3/4] md:aspect-auto md:h-full bg-neutral-950 shrink-0 overflow-hidden group select-none cursor-pointer"
+                className="relative w-full md:w-1/2 aspect-[15/16] md:aspect-auto md:h-full bg-neutral-950 shrink-0 overflow-hidden group select-none cursor-pointer"
               >
                 {/* Story Navigation Top Bars */}
                 {photosList.length > 1 && (
@@ -549,16 +549,16 @@ export default function DiscoverPage() {
               </div>
 
               {/* RIGHT COLUMN: Candidate Details & Actions */}
-              <div className="w-full md:w-1/2 p-6 md:p-8 flex flex-col justify-between overflow-y-auto space-y-5 bg-neutral-900/90 text-white">
+              <div className="w-full md:w-1/2 p-5 sm:p-6 md:p-8 flex flex-col justify-between overflow-y-auto space-y-4 bg-neutral-900/90 text-white shrink-0 md:shrink md:overflow-y-auto">
                 <div className="space-y-4">
                   {/* Name & Badge Row (with pr-10 so Close Button never overlaps) */}
                   <div className="pr-10">
                     <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white truncate">
+                      <h2 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight text-white truncate">
                         {selectedCandidate.name}
                       </h2>
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-extrabold tracking-wide uppercase border shrink-0 ${
+                        className={`px-3 py-1 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide uppercase border shrink-0 ${
                           selectedCandidate.liked
                             ? 'border-rose-500/60 bg-rose-950/60 text-rose-300 shadow-sm shadow-rose-950/50'
                             : 'border-neutral-800 bg-neutral-950 text-neutral-400'
@@ -584,7 +584,7 @@ export default function DiscoverPage() {
                   {cleanBio && (
                     <div className="space-y-1.5">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400">About</span>
-                      <p className="text-xs sm:text-sm text-neutral-200 leading-relaxed bg-neutral-950/80 border-l-4 border-rose-500 border-neutral-800/80 p-4 rounded-2xl shadow-inner">
+                      <p className="text-xs sm:text-sm text-neutral-200 leading-relaxed bg-neutral-950/80 border-l-4 border-rose-500 border-neutral-800/80 p-3.5 sm:p-4 rounded-2xl shadow-inner break-words">
                         {cleanBio}
                       </p>
                     </div>
@@ -609,22 +609,22 @@ export default function DiscoverPage() {
                 </div>
 
                 {/* Match Action Button at Bottom */}
-                <div className="pt-3 border-t border-neutral-800/80">
+                <div className="pt-3 border-t border-neutral-800/80 mt-auto shrink-0">
                   <button
                     onClick={() => handleToggleLike(selectedCandidate)}
-                    className={`w-full py-4 rounded-2xl font-extrabold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-xl active:scale-[0.98] ${selectedCandidate.liked
+                    className={`w-full py-3.5 sm:py-4 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer shadow-xl active:scale-[0.98] ${selectedCandidate.liked
                         ? 'bg-neutral-800 border border-rose-500/50 text-rose-400 hover:bg-rose-950/30'
                         : 'bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:opacity-95 text-white shadow-rose-950/60 hover:shadow-rose-900/80'
                       }`}
                   >
                     {selectedCandidate.liked ? (
                       <>
-                        <IconHeartFilled size={22} className="text-rose-500" />
+                        <IconHeartFilled size={20} className="text-rose-500" />
                         <span>Matched! Tap to Unmatch</span>
                       </>
                     ) : (
                       <>
-                        <IconHeart size={22} className="fill-white/20" />
+                        <IconHeart size={20} className="fill-white/20" />
                         <span>Match with {selectedCandidate.name}</span>
                       </>
                     )}
