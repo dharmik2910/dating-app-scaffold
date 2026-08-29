@@ -6,7 +6,7 @@ function getAccessToken() {
   return localStorage.getItem('accessToken');
 }
 
-async function request(path: string, options: RequestInit = {}) {
+async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
@@ -17,7 +17,7 @@ async function request(path: string, options: RequestInit = {}) {
     },
   });
   if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 /**
