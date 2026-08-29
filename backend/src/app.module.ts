@@ -8,6 +8,7 @@ import { DiscoveryModule } from './discovery/discovery.module';
 import { SwipesModule } from './swipes/swipes.module';
 import { MatchesModule } from './matches/matches.module';
 import { ChatModule } from './chat/chat.module';
+import { StoriesModule } from './stories/stories.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ChatModule } from './chat/chat.module';
     SwipesModule,
     MatchesModule,
     ChatModule,
+    StoriesModule,
   ],
 })
 export class AppModule {}

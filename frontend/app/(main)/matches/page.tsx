@@ -9,6 +9,15 @@ import MatchesSkeleton from '@/components/MatchesSkeleton';
 
 type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
 
+function preloadImages(urls: (string | undefined)[]) {
+  if (typeof window === 'undefined') return;
+  urls.forEach((url) => {
+    if (!url) return;
+    const img = new Image();
+    img.src = url;
+  });
+}
+
 export default function MatchesPage() {
   const [matches, setMatches] = useState<any[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -32,6 +41,10 @@ export default function MatchesPage() {
         setNextCursor(data.nextCursor || null);
         setHasMore(Boolean(data.hasMore));
         setLoading(false);
+
+        // Preload match photos
+        const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
+        preloadImages(photoUrls);
       })
       .catch((err) => {
         console.error(err);
@@ -61,6 +74,10 @@ export default function MatchesPage() {
       setMatches((prev) => [...prev, ...items]);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
+
+      // Preload next batch photos
+      const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
+      preloadImages(photoUrls);
     } catch (err) {
       console.error('Failed to load more matches:', err);
     } finally {
@@ -110,7 +127,7 @@ export default function MatchesPage() {
               <option value="grid5" className="bg-neutral-900 text-white hidden xl:block">Expanded Grid</option>
               <option value="grid3" className="bg-neutral-900 text-white hidden md:block">Standard Grid</option>
               <option value="grid2" className="bg-neutral-900 text-white md:hidden">Compact Grid</option>
-              <option value="grid1" className="bg-neutral-900 text-white">Full Card View</option>
+              <option value="grid1" className="bg-neutral-900 text-white md:hidden">Full Card View</option>
               <option value="list" className="bg-neutral-900 text-white">List View</option>
             </select>
           </div>

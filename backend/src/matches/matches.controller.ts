@@ -13,7 +13,8 @@ export class MatchesController {
     @CurrentUser() userId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
+    @Query('type') type?: 'matches' | 'conversations' | 'all',
   ) {
-    return this.matchesService.listForUser(userId, cursor, limit);
+    return this.matchesService.listForUser(userId, cursor, limit, type);
   }
 }

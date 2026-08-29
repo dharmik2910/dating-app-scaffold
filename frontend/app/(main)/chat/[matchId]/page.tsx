@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/components/AuthContext';
+import { usePresenceStore, formatUserActivity } from '@/lib/usePresenceStore';
 import {
   IconChevronLeft,
   IconSend,
@@ -16,16 +17,28 @@ import {
   IconHeart,
   IconMoodSmile,
   IconInfoCircle,
+  IconTrash,
 } from '@tabler/icons-react';
+import { toast } from 'sonner';
 import ChatSkeleton from '@/components/ChatSkeleton';
+import StoryViewerModal from '@/components/stories/StoryViewerModal';
+import { StoryUserGroup } from '@/components/stories/StoriesBar';
 
-type Message = { id: string; senderId: string; content: string; sentAt: string };
+type Message = {
+  id: string;
+  senderId: string;
+  content: string;
+  sentAt: string;
+  readAt?: string | null;
+  matchId?: string;
+};
 
 type MatchPartner = {
   name: string;
   photo?: string;
   userId?: string;
   bio?: string;
+  updatedAt?: string;
 };
 
 const ICEBREAKERS = [
@@ -38,6 +51,10 @@ const ICEBREAKERS = [
 export default function ChatPage() {
   const { matchId } = useParams<{ matchId: string }>();
   const { user } = useAuth();
+  const onlineUserIds = usePresenceStore((state) => state.onlineUserIds);
+  const lastActiveMap = usePresenceStore((state) => state.lastActiveMap);
+  const setPresenceList = usePresenceStore((state) => state.setPresenceList);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState<boolean>(false);
@@ -46,7 +63,26 @@ export default function ChatPage() {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
+  const [storyGroups, setStoryGroups] = useState<StoryUserGroup[]>([]);
+  const [activeStoryIdx, setActiveStoryIdx] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchStories();
+  }, []);
+
+  function fetchStories() {
+    api
+      .getStoriesFeed()
+      .then((data) => {
+        setStoryGroups(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        console.error('Failed to load stories feed:', err);
+      });
+  }
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const currentUserId = user?.id || user?.userId;
@@ -54,17 +90,28 @@ export default function ChatPage() {
   useEffect(() => {
     // Fetch match partner details
     api
-      .getMatches()
+      .getConversations()
       .then((data) => {
         const matchesList = Array.isArray(data) ? data : data.items || [];
         const currentMatch = matchesList.find((m: any) => m.id === matchId);
         if (currentMatch?.otherUser) {
+          const partnerUserId = currentMatch.otherUser.userId || currentMatch.otherUser.id;
           setPartner({
             name: currentMatch.otherUser.name || 'Match',
             photo: currentMatch.otherUser.photos?.[0]?.url,
-            userId: currentMatch.otherUser.userId || currentMatch.otherUser.id,
+            userId: partnerUserId,
             bio: currentMatch.otherUser.bio,
+            updatedAt: currentMatch.otherUser.updatedAt,
           });
+
+          if (partnerUserId) {
+            const socket = getSocket();
+            socket.emit('queryPresence', [partnerUserId], (res: any[]) => {
+              if (Array.isArray(res)) {
+                setPresenceList(res);
+              }
+            });
+          }
         }
       })
       .catch((err) => console.error('Failed to fetch match details:', err));
@@ -86,12 +133,67 @@ export default function ChatPage() {
 
     const socket = getSocket();
     socket.emit('joinMatch', matchId);
-    socket.on('newMessage', (msg: Message) => setMessages((prev) => [...prev, msg]));
+    socket.emit('markAsRead', matchId);
+
+    const handleNewMsg = (msg: Message) => {
+      // Strictly verify that incoming message belongs to this exact match conversation
+      if ((msg as any).matchId && (msg as any).matchId !== matchId) {
+        return;
+      }
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      // Auto-mark as read if actively in this conversation
+      if (msg.senderId !== currentUserId) {
+        socket.emit('markAsRead', matchId);
+      }
+    };
+
+    const handleMessagesRead = (data: { matchId: string; readerId: string; readAt: string }) => {
+      if (data?.matchId === matchId) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.senderId !== data.readerId && !msg.readAt
+              ? { ...msg, readAt: data.readAt }
+              : msg
+          )
+        );
+      }
+    };
+
+    const handleChatCleared = (data: { matchId: string }) => {
+      if (data?.matchId === matchId) {
+        setMessages([]);
+      }
+    };
+
+    socket.on('newMessage', handleNewMsg);
+    socket.on('messagesRead', handleMessagesRead);
+    socket.on('chatCleared', handleChatCleared);
 
     return () => {
-      socket.off('newMessage');
+      socket.emit('leaveMatch', matchId);
+      socket.off('newMessage', handleNewMsg);
+      socket.off('messagesRead', handleMessagesRead);
+      socket.off('chatCleared', handleChatCleared);
     };
-  }, [matchId]);
+  }, [matchId, currentUserId]);
+
+  const handleClearChat = async () => {
+    try {
+      setIsClearing(true);
+      await api.clearChat(matchId);
+      setMessages([]);
+      setShowClearConfirm(false);
+      toast.success('Chat history cleared');
+    } catch (err) {
+      console.error('Failed to clear chat:', err);
+      toast.error('Failed to clear chat');
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   const loadOlderMessages = async () => {
     if (!nextCursor || loadingMore) return;
@@ -150,35 +252,87 @@ export default function ChatPage() {
         </Link>
 
         {/* Partner Profile Avatar */}
-        <div className="relative w-10 h-10 rounded-full bg-neutral-800 border border-neutral-700 overflow-hidden shrink-0 flex items-center justify-center text-neutral-300 font-semibold shadow">
-          {partner?.photo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={partner.photo} alt={partner.name} className="w-full h-full object-cover" />
-          ) : (
-            <IconUser size={20} className="text-neutral-400" />
-          )}
-          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-neutral-900 shadow-sm" />
-        </div>
+        {(() => {
+          const presence = formatUserActivity(
+            partner?.userId,
+            partner?.updatedAt,
+            onlineUserIds,
+            lastActiveMap
+          );
 
-        <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-bold text-white truncate flex items-center gap-1.5">
-            <span>{partner?.name || 'Match Chat'}</span>
-          </h2>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[10px] text-emerald-400 font-semibold tracking-wide uppercase">Active Now</span>
-          </div>
-        </div>
+          return (
+            <>
+              {(() => {
+                const partnerStoryIdx = storyGroups.findIndex(
+                  (g) => g.userId === partner?.userId && g.stories?.length > 0
+                );
+                const partnerStoryGroup = partnerStoryIdx !== -1 ? storyGroups[partnerStoryIdx] : null;
+                const hasPartnerStory = !!partnerStoryGroup;
+                const hasUnseenPartnerStory = partnerStoryGroup?.hasUnseen;
 
-        {partner?.userId && (
-          <Link
-            href={`/profile`}
-            className="p-2 text-neutral-400 hover:text-rose-400 rounded-xl hover:bg-neutral-800/60 transition-colors"
-            title="View Match Profile"
+                return (
+                  <div
+                    onClick={() => {
+                      if (hasPartnerStory) {
+                        setActiveStoryIdx(partnerStoryIdx);
+                      }
+                    }}
+                    className={`relative w-10 h-10 rounded-full shrink-0 flex items-center justify-center p-0.5 transition-transform ${hasPartnerStory
+                        ? hasUnseenPartnerStory
+                          ? 'bg-gradient-to-tr from-amber-500 via-rose-500 to-fuchsia-600 scale-105 shadow cursor-pointer'
+                          : 'bg-gradient-to-tr from-rose-500/80 to-purple-600/80 cursor-pointer'
+                        : 'bg-neutral-800 border border-neutral-700'
+                      }`}
+                    title={hasPartnerStory ? `View ${partner?.name}'s story` : ''}
+                  >
+                    <div className="w-full h-full rounded-full bg-neutral-900 overflow-hidden flex items-center justify-center text-neutral-400">
+                      {partner?.photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={partner.photo} alt={partner.name} className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        <IconUser size={20} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex-1 min-w-0">
+                <h2 className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                  <span>{partner?.name || 'Match Chat'}</span>
+                </h2>
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${presence.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-neutral-500'}`} />
+                  <span className={`text-[10px] ${presence.textClass} tracking-wide uppercase`}>
+                    {presence.statusText}
+                  </span>
+                </div>
+              </div>
+            </>
+          );
+        })()}
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={messages.length === 0}
+            className="p-2 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors disabled:opacity-30 disabled:hover:text-neutral-400"
+            title="Clear Chat"
           >
-            <IconInfoCircle size={20} />
-          </Link>
-        )}
+            <IconTrash size={20} />
+          </button>
+
+          {partner?.userId && (
+            <Link
+              href={`/profile`}
+              className="p-2 text-neutral-400 hover:text-rose-400 rounded-xl hover:bg-neutral-800/60 transition-colors"
+              title="View Match Profile"
+            >
+              <IconInfoCircle size={20} />
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Messages area */}
@@ -261,25 +415,47 @@ export default function ChatPage() {
 
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[78%]`}>
                   <div
-                    className={`px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-md ${
-                      isMe
+                    className={`px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-md ${isMe
                         ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 text-white rounded-2xl rounded-tr-xs font-medium'
                         : 'bg-neutral-900 border border-neutral-800 text-neutral-100 rounded-2xl rounded-tl-xs'
-                    }`}
+                      }`}
                   >
                     {m.content}
                   </div>
                   <div
-                    className={`flex items-center gap-1 text-[10px] text-neutral-500 mt-1 px-1 font-medium ${
-                      isMe ? 'justify-end' : 'justify-start'
-                    }`}
+                    className={`flex items-center gap-1 text-[10px] text-neutral-500 mt-1 px-1 font-medium ${isMe ? 'justify-end' : 'justify-start'
+                      }`}
                   >
                     <span>
                       {m.sentAt
                         ? new Date(m.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : ''}
                     </span>
-                    {isMe && <IconChecks size={15} className="text-rose-400" />}
+                    {isMe && (() => {
+                      const isPartnerOnline = Boolean(partner?.userId && onlineUserIds.includes(partner.userId));
+                      if (m.readAt) {
+                        // Read: Double check in vivid Red / Rose
+                        return (
+                          <span title="Read" className="inline-flex items-center text-rose-500 font-bold drop-shadow-sm ml-0.5">
+                            <IconChecks size={15} className="stroke-[2.5]" />
+                          </span>
+                        );
+                      }
+                      if (isPartnerOnline) {
+                        // Delivered / Recipient Online: Double check in gray
+                        return (
+                          <span title="Delivered" className="inline-flex items-center text-neutral-400 ml-0.5">
+                            <IconChecks size={15} className="stroke-[2]" />
+                          </span>
+                        );
+                      }
+                      // Sent / Recipient Offline: Single check in gray
+                      return (
+                        <span title="Sent" className="inline-flex items-center text-neutral-400 ml-0.5">
+                          <IconCheck size={15} className="stroke-[2]" />
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -330,6 +506,54 @@ export default function ChatPage() {
           <IconSend size={15} />
         </button>
       </div>
+
+      {/* Clear Chat Confirmation Modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+              <IconTrash size={24} />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-bold text-white">Clear Chat History?</h3>
+              <p className="text-xs text-neutral-400">
+                Are you sure you want to clear all messages with{' '}
+                <span className="text-white font-semibold">{partner?.name || 'this user'}</span>? This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                disabled={isClearing}
+                className="w-full py-2.5 rounded-xl border border-neutral-700 bg-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white hover:bg-neutral-700 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearChat}
+                disabled={isClearing}
+                className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white shadow-lg shadow-rose-600/30 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {isClearing ? 'Clearing...' : 'Yes, Clear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Story Viewer Modal in Mobile Chat */}
+      {activeStoryIdx !== null && (
+        <StoryViewerModal
+          groups={storyGroups}
+          initialUserIndex={activeStoryIdx}
+          onClose={() => setActiveStoryIdx(null)}
+          onStoryDeleted={() => fetchStories()}
+        />
+      )}
     </main>
   );
 }

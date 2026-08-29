@@ -13,8 +13,8 @@ export class S3Service {
     },
   });
 
-  async getUploadUrl(userId: string, contentType: string) {
-    const key = `photos/${userId}/${randomUUID()}`;
+  async getUploadUrl(userId: string, contentType: string, folder = 'photos') {
+    const key = `${folder}/${userId}/${randomUUID()}`;
     const command = new PutObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME,
       Key: key,
@@ -28,8 +28,8 @@ export class S3Service {
     return { uploadUrl, publicUrl, key };
   }
 
-  async uploadBuffer(userId: string, buffer: Buffer, contentType: string) {
-    const key = `photos/${userId}/${randomUUID()}`;
+  async uploadBuffer(userId: string, buffer: Buffer, contentType: string, folder = 'photos') {
+    const key = `${folder}/${userId}/${randomUUID()}`;
     try {
       await this.client.send(
         new PutObjectCommand({

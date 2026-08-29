@@ -88,10 +88,19 @@ export const api = {
   },
   swipe: (swipedId: string, action: 'LIKE' | 'PASS' | 'SUPERLIKE' | 'UNLIKE') =>
     request('/swipes', { method: 'POST', body: JSON.stringify({ swipedId, action }) }),
-  getMatches: (cursor?: string, limit?: number) => {
+  getMatches: (cursor?: string, limit?: number, type: 'matches' | 'conversations' | 'all' = 'matches') => {
     const params = new URLSearchParams();
     if (cursor) params.set('cursor', cursor);
     if (limit) params.set('limit', limit.toString());
+    if (type) params.set('type', type);
+    const query = params.toString();
+    return request(`/matches${query ? `?${query}` : ''}`);
+  },
+  getConversations: (cursor?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set('cursor', cursor);
+    if (limit) params.set('limit', limit.toString());
+    params.set('type', 'conversations');
     const query = params.toString();
     return request(`/matches${query ? `?${query}` : ''}`);
   },
@@ -102,6 +111,8 @@ export const api = {
     const query = params.toString();
     return request(`/chat/${matchId}/history${query ? `?${query}` : ''}`);
   },
+  clearChat: (matchId: string) =>
+    request(`/chat/${matchId}/clear`, { method: 'DELETE' }),
   getPhotoUploadUrl: (contentType: string) =>
     request('/photos/upload-url', { method: 'POST', body: JSON.stringify({ contentType }) }),
   confirmPhotoUpload: (publicUrl: string, key: string, order?: number) =>
@@ -154,5 +165,38 @@ export const api = {
     if (!res.ok) throw new Error(`Photo upload failed: ${await res.text()}`);
     return res.json();
   },
+  uploadStoryMedia: async (file: File) => {
+    let fileToUpload = file;
+    if (file.type.startsWith('image/')) {
+      fileToUpload = await compressImage(file);
+    }
+    const formData = new FormData();
+    formData.append('file', fileToUpload);
+
+    const token = getAccessToken();
+    const res = await fetch(`${API_URL}/stories/upload-file`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error(`Story upload failed: ${await res.text()}`);
+    return res.json() as Promise<{ mediaUrl: string; key: string }>;
+  },
   deletePhoto: (id: string) => request(`/photos/${id}`, { method: 'DELETE' }),
+  getStoriesFeed: () => request('/stories/feed'),
+  createStory: (mediaUrl: string, mediaType = 'image', caption?: string) =>
+    request('/stories', {
+      method: 'POST',
+      body: JSON.stringify({ mediaUrl, mediaType, caption }),
+    }),
+  markStoryViewed: (storyId: string) =>
+    request(`/stories/${storyId}/view`, { method: 'POST' }),
+  getStoryViewers: (storyId: string) =>
+    request<{ viewerId: string; viewedAt: string; name: string; photoUrl: string | null; bio: string | null; age: number | null }[]>(`/stories/${storyId}/viewers`),
+  deleteStory: (storyId: string) =>
+    request(`/stories/${storyId}`, { method: 'DELETE' }),
 };
+

@@ -8,5 +8,6 @@ import { AuthModule } from '../auth/auth.module';
   imports: [AuthModule],
   controllers: [PhotosController],
   providers: [PhotosService, S3Service],
+  exports: [S3Service, PhotosService],
 })
 export class PhotosModule {}

@@ -11,9 +11,18 @@ export class SwipesService {
         where: { swiperId, swipedId },
       });
       const [u1, u2] = [swiperId, swipedId].sort();
-      await this.prisma.match.deleteMany({
-        where: { user1Id: u1, user2Id: u2 },
+      const existingMatch = await this.prisma.match.findUnique({
+        where: { user1Id_user2Id: { user1Id: u1, user2Id: u2 } },
+        include: { _count: { select: { messages: true } } },
       });
+
+      // Only delete the match record completely if no chat messages were ever sent.
+      // If messages exist, retain the match so chat history is kept and visible in Chat.
+      if (existingMatch && existingMatch._count.messages === 0) {
+        await this.prisma.match.deleteMany({
+          where: { user1Id: u1, user2Id: u2 },
+        });
+      }
       return { matched: false, unliked: true };
     }
 

@@ -26,6 +26,8 @@ model User {
   matchesA      Match[]  @relation("MatchUser1")
   matchesB      Match[]  @relation("MatchUser2")
   messages      Message[]
+  stories       Story[]
+  storyViews    StoryView[]
 }
 
 model Profile {
@@ -95,4 +97,27 @@ model Message {
   content   String
   sentAt    DateTime @default(now())
   readAt    DateTime?
+}
+
+model Story {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaUrl  String
+  mediaType String      @default("image") // "image" or "video"
+  caption   String?
+  createdAt DateTime    @default(now())
+  expiresAt DateTime
+  views     StoryView[]
+}
+
+model StoryView {
+  id        String   @id @default(uuid())
+  storyId   String
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewerId  String
+  viewer    User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@unique([storyId, viewerId])
 }

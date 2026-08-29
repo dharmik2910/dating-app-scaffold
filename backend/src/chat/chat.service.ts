@@ -6,11 +6,41 @@ export class ChatService {
   constructor(private prisma: PrismaService) {}
 
   async saveMessage(matchId: string, senderId: string, content: string) {
-    const match = await this.prisma.match.findUnique({ where: { id: matchId } });
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        user1: {
+          include: {
+            profile: true,
+            photos: { orderBy: { order: 'asc' }, take: 1 },
+          },
+        },
+        user2: {
+          include: {
+            profile: true,
+            photos: { orderBy: { order: 'asc' }, take: 1 },
+          },
+        },
+      },
+    });
+
     if (!match || (match.user1Id !== senderId && match.user2Id !== senderId)) {
       throw new ForbiddenException('Not part of this match');
     }
-    return this.prisma.message.create({ data: { matchId, senderId, content } });
+
+    const message = await this.prisma.message.create({ data: { matchId, senderId, content } });
+    const recipientId = match.user1Id === senderId ? match.user2Id : match.user1Id;
+    const senderUser = match.user1Id === senderId ? match.user1 : match.user2;
+
+    return {
+      ...message,
+      recipientId,
+      sender: {
+        id: senderUser.id,
+        name: senderUser.profile?.name || 'Someone',
+        photo: senderUser.photos?.[0]?.url || null,
+      },
+    };
   }
 
   async getHistory(matchId: string, cursor?: string, limitStr?: string) {
@@ -33,5 +63,45 @@ export class ChatService {
       nextCursor,
       hasMore,
     };
+  }
+
+  async isParticipant(matchId: string, userId: string): Promise<boolean> {
+    if (!matchId || !userId) return false;
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { user1Id: true, user2Id: true },
+    });
+    return Boolean(match && (match.user1Id === userId || match.user2Id === userId));
+  }
+
+  async markMessagesAsRead(matchId: string, readerUserId: string): Promise<Date> {
+    const now = new Date();
+    await this.prisma.message.updateMany({
+      where: {
+        matchId,
+        senderId: { not: readerUserId },
+        readAt: null,
+      },
+      data: {
+        readAt: now,
+      },
+    });
+    return now;
+  }
+
+  async clearMessages(matchId: string, userId: string) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+    });
+
+    if (!match || (match.user1Id !== userId && match.user2Id !== userId)) {
+      throw new ForbiddenException('Not part of this match');
+    }
+
+    await this.prisma.message.deleteMany({
+      where: { matchId },
+    });
+
+    return { success: true };
   }
 }
