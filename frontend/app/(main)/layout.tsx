@@ -32,10 +32,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100 pb-16 lg:pb-0">
+    <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100 pb-16 lg:pb-0 overflow-x-hidden w-full max-w-full">
       <LiveNotificationListener />
       <Navbar user={user} />
-      <div className="flex-1 w-full">{children}</div>
+      <div className="flex-1 w-full min-w-0 overflow-x-hidden">{children}</div>
     </div>
   );
 }

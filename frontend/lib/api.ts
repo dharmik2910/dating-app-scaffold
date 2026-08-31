@@ -79,10 +79,11 @@ export const api = {
     request('/auth/verify', { method: 'POST', body: JSON.stringify({ idToken }) }),
   getMe: () => request('/users/me'),
   updateProfile: (data: unknown) => request('/users/me', { method: 'PUT', body: JSON.stringify(data) }),
-  getDiscovery: (cursor?: string, limit?: number) => {
+  getDiscovery: (cursor?: string, limit?: number, q?: string) => {
     const params = new URLSearchParams();
     if (cursor) params.set('cursor', cursor);
     if (limit) params.set('limit', limit.toString());
+    if (q) params.set('q', q);
     const query = params.toString();
     return request(`/discovery${query ? `?${query}` : ''}`);
   },

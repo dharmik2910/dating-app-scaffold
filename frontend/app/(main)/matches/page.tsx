@@ -3,7 +3,21 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { IconHeart, IconHeartFilled, IconMessageCircle, IconSparkles, IconUser, IconLayoutGrid, IconGridDots, IconSquare, IconList, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import {
+  IconHeart,
+  IconHeartFilled,
+  IconMessageCircle,
+  IconSparkles,
+  IconUser,
+  IconSquare,
+  IconLayoutGrid,
+  IconGridDots,
+  IconList,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCompass,
+  IconCircleCheckFilled,
+} from '@tabler/icons-react';
 import { toast } from 'sonner';
 import MatchesSkeleton from '@/components/MatchesSkeleton';
 
@@ -42,7 +56,6 @@ export default function MatchesPage() {
         setHasMore(Boolean(data.hasMore));
         setLoading(false);
 
-        // Preload match photos
         const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
         preloadImages(photoUrls);
       })
@@ -75,7 +88,6 @@ export default function MatchesPage() {
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
 
-      // Preload next batch photos
       const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
       preloadImages(photoUrls);
     } catch (err) {
@@ -86,7 +98,6 @@ export default function MatchesPage() {
   }
 
   async function handleUnmatch(matchId: string, otherUserId: string, otherName?: string) {
-    // Optimistically remove match card from UI
     setMatches((prev) => prev.filter((m) => m.id !== matchId));
 
     try {
@@ -102,62 +113,92 @@ export default function MatchesPage() {
   }
 
   return (
-    <main className="w-full px-4 sm:px-8 py-8 min-h-[calc(100vh-4rem)] flex flex-col">
-      {/* Header */}
-      <div className="flex flex-row items-center justify-between gap-4 mb-8">
+    <main className="w-full px-4 sm:px-8 py-6 min-h-[calc(100vh-4rem)] flex flex-col">
+      {/* Top Header & Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight flex items-center gap-2.5">
-            <IconHeart className="text-rose-500 fill-rose-500/20" size={30} />
-            <span>Your Matches</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-neutral-400 mt-1 hidden sm:block">
-            People who matched with you. Click heart to unmatch or card to start a chat!
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-md shadow-rose-500/20">
+              <IconHeart size={22} className="stroke-[2.2] fill-white/20" />
+            </span>
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              Your Matches
+            </h1>
+          </div>
+          <p className="text-xs text-neutral-400 mt-1">
+            People who connected with you. Tap any match to jump straight into conversation.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-shrink-0">
-          {/* View Switcher Dropdown Select */}
-          <div className="relative flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl">
-            <span className="text-xs font-semibold text-neutral-400 hidden xs:inline">View:</span>
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value as ViewMode)}
-              className="bg-transparent text-xs font-semibold text-white outline-none cursor-pointer pr-1"
-            >
-              <option value="grid5" className="bg-neutral-900 text-white hidden xl:block">Expanded Grid</option>
-              <option value="grid3" className="bg-neutral-900 text-white hidden md:block">Standard Grid</option>
-              <option value="grid2" className="bg-neutral-900 text-white md:hidden">Compact Grid</option>
-              <option value="grid1" className="bg-neutral-900 text-white md:hidden">Full Card View</option>
-              <option value="list" className="bg-neutral-900 text-white">List View</option>
-            </select>
-          </div>
-
-          <span className="px-3 py-1.5 bg-rose-950/60 border border-rose-800/50 text-rose-300 text-xs font-semibold rounded-full hidden sm:inline-block">
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          {/* Matches Count Pill */}
+          <span className="px-3.5 py-1.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-2xl">
             {matches.length} {matches.length === 1 ? 'Match' : 'Matches'}
           </span>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">
+            {/* Dense 5-Col Grid Option (Desktop only) */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid5')}
+              title="Expanded Grid (5 columns)"
+              className={`hidden md:block p-1.5 rounded-xl transition-all ${
+                viewMode === 'grid5' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <IconGridDots size={16} />
+            </button>
+            {/* Full Card View Option (Mobile only) */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid1')}
+              title="Full Card View"
+              className={`md:hidden p-1.5 rounded-xl transition-all ${viewMode === 'grid1' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconSquare size={16} />
+            </button>
+            {/* Standard Grid Option */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid3')}
+              title="Standard Grid"
+              className={`p-1.5 rounded-xl transition-all ${viewMode === 'grid3' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconLayoutGrid size={16} />
+            </button>
+            {/* List View Option */}
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`p-1.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconList size={16} />
+            </button>
+          </div>
         </div>
       </div>
-
-
 
       {loading ? (
         <MatchesSkeleton viewMode={viewMode} />
       ) : matches.length > 0 ? (
-        /* Dynamic Grid/List Matches Container */
         <div
           className={
             viewMode === 'grid5'
-              ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
+              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-5'
               : viewMode === 'grid3'
-                ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
+                ? 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6'
                 : viewMode === 'grid2'
-                  ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
+                  ? 'grid grid-cols-2 gap-3 max-w-3xl mx-auto w-full'
                   : viewMode === 'grid1'
                     ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-                    : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
+                    : 'flex flex-col gap-3 max-w-4xl mx-auto w-full'
           }
         >
-
           {matches.map((m) => {
             const targetUserId = m.otherUser?.userId || m.otherUser?.id || m.otherUserId;
             const photosList = m.otherUser?.photos && m.otherUser.photos.length > 0 ? m.otherUser.photos : [];
@@ -168,18 +209,18 @@ export default function MatchesPage() {
               <Link
                 key={m.id}
                 href={`/chat/${m.id}`}
-                className={`group relative bg-neutral-900 border border-neutral-800/90 hover:border-rose-500/50 rounded-3xl overflow-hidden shadow-lg hover:shadow-rose-950/30 transition-all duration-300 ${
+                className={`group relative bg-neutral-900/90 border border-neutral-800/80 hover:border-neutral-700 hover:shadow-[0_12px_30px_-10px_rgba(0,0,0,0.8)] rounded-2xl sm:rounded-3xl overflow-hidden transition-all duration-300 ${
                   viewMode === 'list'
-                    ? 'flex flex-row items-center p-3 gap-4 w-full'
-                    : 'flex flex-col w-full'
+                    ? 'flex flex-row items-center p-2.5 sm:p-3 gap-3 sm:gap-4 w-full'
+                    : 'w-full aspect-[3/4] flex flex-col'
                 }`}
               >
-                {/* Photo */}
+                {/* Photo Container */}
                 <div
-                  className={`relative bg-neutral-800 overflow-hidden ${
+                  className={`bg-neutral-950 overflow-hidden ${
                     viewMode === 'list'
-                      ? 'w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex-shrink-0'
-                      : 'aspect-[3/4] w-full'
+                      ? 'relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex-shrink-0 ring-1 ring-neutral-800'
+                      : 'relative w-full h-full absolute inset-0'
                   }`}
                 >
                   {/* Photo Story Bars */}
@@ -188,9 +229,8 @@ export default function MatchesPage() {
                       {photosList.map((_: any, idx: number) => (
                         <div
                           key={idx}
-                          className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                            idx === activePhotoIdx ? 'bg-white shadow-md' : 'bg-white/35'
-                          }`}
+                          className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx === activePhotoIdx ? 'bg-white shadow' : 'bg-white/30'
+                            }`}
                         />
                       ))}
                     </div>
@@ -201,14 +241,14 @@ export default function MatchesPage() {
                     <img
                       src={currentPhotoUrl}
                       alt={m.otherUser?.name || 'Match'}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
                     />
                   ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
+                    <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
                       <IconUser size={48} stroke={1.5} />
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/30 to-transparent pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent pointer-events-none" />
 
                   {/* Left / Right Photo Arrows */}
                   {photosList.length > 1 && viewMode !== 'list' && (
@@ -216,7 +256,7 @@ export default function MatchesPage() {
                       <button
                         type="button"
                         onClick={(e) => cycleMatchPhoto(m.id, photosList.length, 'prev', e)}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
                         title="Previous photo"
                       >
                         <IconChevronLeft size={16} />
@@ -224,7 +264,7 @@ export default function MatchesPage() {
                       <button
                         type="button"
                         onClick={(e) => cycleMatchPhoto(m.id, photosList.length, 'next', e)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
                         title="Next photo"
                       >
                         <IconChevronRight size={16} />
@@ -232,7 +272,7 @@ export default function MatchesPage() {
                     </>
                   )}
 
-                  {/* Interactive Heart Icon for Unmatching */}
+                  {/* Clean Interactive Heart Icon for Unmatching */}
                   <button
                     type="button"
                     onClick={(e) => {
@@ -242,11 +282,10 @@ export default function MatchesPage() {
                     }}
                     title="Click heart to unmatch"
                     aria-label={`Unmatch ${m.otherUser?.name || 'user'}`}
-                    className={`absolute top-3.5 right-3.5 z-20 text-rose-500 opacity-90 hover:opacity-100 hover:scale-110 active:scale-95 transition-all cursor-pointer drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)] ${
-                      viewMode === 'list' ? 'hidden' : ''
-                    }`}
+                    className={`absolute top-3.5 right-3.5 z-20 text-rose-500 opacity-90 hover:opacity-100 hover:scale-110 active:scale-90 transition-all cursor-pointer drop-shadow-[0_2px_12px_rgba(244,63,94,0.8)] ${viewMode === 'list' ? 'hidden' : ''
+                      }`}
                   >
-                    <IconHeartFilled size={26} className="hover:text-rose-400 transition-colors" />
+                    <IconHeartFilled size={26} className="hover:text-rose-400 transition-colors animate-pulse" />
                   </button>
 
                   {/* Information Overlay */}
@@ -257,12 +296,15 @@ export default function MatchesPage() {
                         : 'absolute bottom-0 inset-x-0 p-4 text-white'
                     }
                   >
-                    <h3 className="text-lg font-bold truncate group-hover:text-rose-400 transition-colors">
-                      {m.otherUser?.name || 'Match'}
-                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-base font-bold tracking-tight truncate text-white">
+                        {m.otherUser?.name || 'Match'}
+                      </h3>
+                      <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
+                    </div>
                     {m.otherUser?.bio && (
                       <p className="text-xs text-neutral-300/90 line-clamp-1 mt-0.5">
-                        {m.otherUser.bio.replace(/\[INTERESTS:.*?\]/, '').trim()}
+                        {m.otherUser.bio.replace(/\[CITY:.*?\]/, '').replace(/\[INTERESTS:.*?\]/, '').trim()}
                       </p>
                     )}
                   </div>
@@ -271,18 +313,21 @@ export default function MatchesPage() {
                 {/* List View Content Section */}
                 {viewMode === 'list' ? (
                   <div className="flex-1 flex items-center justify-between min-w-0 pr-2">
-                    <div className="min-w-0">
-                      <h3 className="text-base font-bold text-white truncate group-hover:text-rose-400 transition-colors">
-                        {m.otherUser?.name || 'Match'}
-                      </h3>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                          {m.otherUser?.name || 'Match'}
+                        </h3>
+                        <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
+                      </div>
                       {m.otherUser?.bio && (
-                        <p className="text-xs text-neutral-400 line-clamp-1 mt-0.5">
-                          {m.otherUser.bio.replace(/\[INTERESTS:.*?\]/, '').trim()}
+                        <p className="text-xs text-neutral-400 line-clamp-1">
+                          {m.otherUser.bio.replace(/\[CITY:.*?\]/, '').replace(/\[INTERESTS:.*?\]/, '').trim()}
                         </p>
                       )}
-                      <span className="inline-flex items-center gap-1 text-xs text-rose-400 font-medium mt-1">
+                      <span className="inline-flex items-center gap-1 text-xs text-rose-400 font-medium">
                         <IconMessageCircle size={13} />
-                        <span>Start Chat</span>
+                        <span>Chat Now</span>
                       </span>
                     </div>
 
@@ -294,42 +339,44 @@ export default function MatchesPage() {
                         handleUnmatch(m.id, targetUserId, m.otherUser?.name);
                       }}
                       title="Click heart to unmatch"
-                      className="p-2.5 text-rose-500 hover:text-rose-400 transition-transform hover:scale-110 ml-3 cursor-pointer"
+                      className="p-2.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-500 hover:text-rose-400 transition-all hover:scale-105 ml-3 cursor-pointer"
                     >
-                      <IconHeartFilled size={24} />
+                      <IconHeartFilled size={20} />
                     </button>
                   </div>
                 ) : (
                   /* Action Bar for Grid Modes */
-                  <div className="px-4 py-2.5 bg-neutral-950/80 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400 group-hover:text-rose-400 font-medium transition-colors">
+                  <div className="px-4 py-2.5 bg-neutral-900/60 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400 group-hover:text-rose-400 font-medium transition-colors">
                     <span className="flex items-center gap-1.5">
-                      <IconMessageCircle size={14} />
-                      <span>Start Chat</span>
+                      <IconMessageCircle size={14} className="text-rose-400" />
+                      <span>Chat Now</span>
                     </span>
-                    <span className="text-[10px] text-neutral-500 font-semibold group-hover:text-rose-300">
+                    <span className="text-[11px] text-neutral-500 font-semibold group-hover:text-rose-300">
                       →
                     </span>
                   </div>
                 )}
               </Link>
-
             );
           })}
         </div>
       ) : (
         /* Empty State */
-        <div className="flex-1 flex items-center justify-center py-16">
-          <div className="text-center py-12 px-6 bg-neutral-900/40 border border-neutral-800 rounded-3xl max-w-md mx-auto">
-            <IconSparkles size={44} className="text-rose-400 mx-auto mb-3" />
-            <h3 className="text-lg font-semibold text-white">No Matches Yet</h3>
-            <p className="text-neutral-400 text-xs mt-1 max-w-xs mx-auto mb-6 leading-relaxed">
+        <div className="flex-1 flex items-center justify-center py-12 min-h-[50vh]">
+          <div className="text-center py-14 px-8 bg-neutral-900/60 border border-neutral-800/80 rounded-3xl max-w-sm w-full mx-auto shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-500/20 via-rose-500/10 to-amber-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto mb-4 shadow-inner">
+              <IconSparkles size={32} className="animate-pulse" />
+            </div>
+            <h3 className="text-xl font-bold text-white tracking-tight">No Matches Yet</h3>
+            <p className="text-neutral-400 text-xs sm:text-sm mt-2 max-w-xs mx-auto mb-6 leading-relaxed">
               Head over to Discover, browse potential candidates, and hit the match heart icon!
             </p>
             <Link
               href="/discover"
-              className="inline-flex items-center gap-2 bg-gradient-to-r from-rose-500 to-amber-500 font-semibold text-xs px-5 py-3 rounded-full text-white shadow-lg shadow-rose-500/20 hover:opacity-95 transition-opacity"
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 font-bold text-xs sm:text-sm px-6 py-3.5 rounded-full text-white shadow-xl shadow-rose-500/25 hover:scale-105 active:scale-95 transition-all"
             >
-              Discover Candidates
+              <IconCompass size={18} />
+              <span>Discover Candidates</span>
             </Link>
           </div>
         </div>
@@ -340,7 +387,7 @@ export default function MatchesPage() {
           <button
             onClick={loadMoreMatches}
             disabled={loadingMore}
-            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-rose-500/50 text-neutral-200 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all disabled:opacity-50"
+            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-rose-500/50 text-neutral-200 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all disabled:opacity-50 cursor-pointer"
           >
             {loadingMore ? 'Loading matches...' : 'Load More Matches'}
           </button>

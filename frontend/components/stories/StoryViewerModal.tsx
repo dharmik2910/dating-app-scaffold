@@ -329,7 +329,7 @@ export default function StoryViewerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex items-center justify-center select-none animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-2xl flex items-center justify-center select-none animate-in fade-in duration-200 overflow-x-hidden">
       {/* Desktop Prev / Next User Buttons */}
       <button
         type="button"

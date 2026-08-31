@@ -90,11 +90,11 @@ export default function StoryUploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200 overflow-y-auto">
+    <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200 overflow-y-auto overflow-x-hidden">
       {/* Background Glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[480px] h-[480px] bg-gradient-to-tr from-rose-600/20 via-fuchsia-600/15 to-amber-500/20 blur-[100px] rounded-full pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] sm:w-[480px] h-[320px] sm:h-[480px] bg-gradient-to-tr from-rose-600/20 via-fuchsia-600/15 to-amber-500/20 blur-[100px] rounded-full pointer-events-none" />
 
-      <div className="relative w-full max-w-lg bg-neutral-900/95 border border-neutral-800/80 rounded-[32px] overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] flex flex-col my-auto">
+      <div className="relative w-full max-w-lg bg-neutral-900/95 border border-neutral-800/80 rounded-[15px] overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] flex flex-col my-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/80 bg-neutral-950/40 backdrop-blur-md">
           <div className="flex items-center gap-3">

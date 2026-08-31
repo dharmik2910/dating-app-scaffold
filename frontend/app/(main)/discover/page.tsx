@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -12,17 +12,18 @@ import {
   IconSparkles,
   IconHeart,
   IconHeartFilled,
+  IconSquare,
   IconLayoutGrid,
   IconGridDots,
-  IconSquare,
   IconList,
   IconX,
   IconChevronLeft,
   IconChevronRight,
   IconCompass,
-  IconWifi,
-  IconCircleCheck,
+  IconCircleCheckFilled,
   IconMessageCircle2,
+  IconSearch,
+  IconFlame,
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import DiscoverSkeleton from '@/components/DiscoverSkeleton';
@@ -32,11 +33,15 @@ import StoryUploadModal from '@/components/stories/StoryUploadModal';
 
 type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
 
+const PAGE_SIZE = 15;
+
 type Candidate = {
   userId: string;
   name: string;
   bio?: string;
   distance_km: number;
+  latitude?: number;
+  longitude?: number;
   liked?: boolean;
   photos?: { id: string; url: string }[];
 };
@@ -59,15 +64,27 @@ const INTEREST_LABELS: Record<string, string> = {
 };
 
 function parseBioContent(rawBio?: string) {
-  if (!rawBio) return { cleanBio: '', interests: [] };
-  const match = rawBio.match(/\[INTERESTS:(.*?)\]/);
-  if (match && match[1]) {
-    const interests = match[1].split(',').map((s) => s.trim()).filter(Boolean);
-    const cleanBio = rawBio.replace(/\[INTERESTS:.*?\]/, '').trim();
-    return { cleanBio, interests };
+  if (!rawBio) return { cleanBio: '', interests: [] as string[], city: '' };
+  let cleanBio = rawBio;
+  let city = '';
+  let interests: string[] = [];
+
+  const cityMatch = cleanBio.match(/\[CITY:(.*?)\]/);
+  if (cityMatch && cityMatch[1]) {
+    city = cityMatch[1].trim();
+    cleanBio = cleanBio.replace(/\[CITY:.*?\]/, '');
   }
-  return { cleanBio: rawBio.trim(), interests: [] };
+
+  const intMatch = cleanBio.match(/\[INTERESTS:(.*?)\]/);
+  if (intMatch && intMatch[1]) {
+    interests = intMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
+    cleanBio = cleanBio.replace(/\[INTERESTS:.*?\]/, '');
+  }
+
+  return { cleanBio: cleanBio.trim(), interests, city };
 }
+
+const cityLookupCache: Record<string, string> = {};
 
 function preloadImages(urls: (string | undefined)[]) {
   if (typeof window === 'undefined') return;
@@ -85,7 +102,11 @@ export default function DiscoverPage() {
   const setPresenceList = usePresenceStore((state) => state.setPresenceList);
 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidateCities, setCandidateCities] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState<boolean>(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -98,17 +119,64 @@ export default function DiscoverPage() {
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [startingChat, setStartingChat] = useState<boolean>(false);
 
+  const observerTarget = useRef<HTMLDivElement | null>(null);
+
   // Stories feature states
   const [storyGroups, setStoryGroups] = useState<StoryUserGroup[]>([]);
   const [storiesLoading, setStoriesLoading] = useState<boolean>(true);
   const [activeStoryUserIdx, setActiveStoryUserIdx] = useState<number | null>(null);
   const [isUploadStoryOpen, setIsUploadStoryOpen] = useState<boolean>(false);
 
+  // Debounce search query input (250ms)
   useEffect(() => {
-    fetchCandidates();
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  async function resolveCitiesForCandidates(items: Candidate[]) {
+    const toLookup = items.filter((c) => {
+      const { city } = parseBioContent(c.bio);
+      return !city && c.latitude != null && c.longitude != null;
+    });
+
+    if (toLookup.length === 0) return;
+
+    for (const c of toLookup) {
+      const key = `${c.latitude!.toFixed(3)},${c.longitude!.toFixed(3)}`;
+      if (cityLookupCache[key]) {
+        setCandidateCities((prev) => ({ ...prev, [c.userId]: cityLookupCache[key] }));
+        continue;
+      }
+
+      try {
+        const res = await fetch(
+          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${c.latitude}&longitude=${c.longitude}&localityLanguage=en`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const city = data.city || data.locality || data.principalSubdivision;
+          const country = data.countryName || data.countryCode;
+          const label = city ? (country ? `${city}, ${country}` : city) : '';
+          if (label) {
+            cityLookupCache[key] = label;
+            setCandidateCities((prev) => ({ ...prev, [c.userId]: label }));
+          }
+        }
+      } catch (err) {
+        console.warn('Async city lookup error:', err);
+      }
+    }
+  }
+
+  useEffect(() => {
+    fetchCandidates(debouncedSearchQuery);
+  }, [debouncedSearchQuery]);
+
+  useEffect(() => {
     fetchStories();
 
-    // Listen to real-time story WebSocket events
     const socket = getSocket();
     const handleStoryEvent = () => {
       fetchStories();
@@ -155,7 +223,6 @@ export default function DiscoverPage() {
           img.onload = () => setModalImgLoading(false);
           img.onerror = () => setModalImgLoading(false);
         }
-        // Preload rest of this candidate's photos
         preloadImages(photosList.map((p) => p.url));
       } else {
         setModalImgLoading(false);
@@ -175,58 +242,99 @@ export default function DiscoverPage() {
     }
   }
 
-  function fetchCandidates() {
-    setLoading(true);
+  function fetchCandidates(queryText?: string) {
+    setHasScrolled(false);
+    const isSearchTrigger = Boolean(queryText);
+    if (isSearchTrigger) {
+      setIsSearching(true);
+    } else {
+      setLoading(true);
+    }
+
     api
-      .getDiscovery()
+      .getDiscovery(undefined, PAGE_SIZE, queryText)
       .then((data) => {
         const items = Array.isArray(data) ? data : data.items || [];
         setCandidates(items);
         setNextCursor(data.nextCursor || null);
         setHasMore(Boolean(data.hasMore));
-        setLoading(false);
 
-        // Preload first batch of photos into browser cache for instant rendering
         const photoUrls = items.flatMap((c: Candidate) => (c.photos || []).map((p: any) => p.url)).filter(Boolean);
         preloadImages(photoUrls);
 
-        // Query real-time presence
         queryCandidatesPresence(items);
+        resolveCitiesForCandidates(items);
       })
       .catch((err) => {
         console.error(err);
+      })
+      .finally(() => {
         setLoading(false);
+        setIsSearching(false);
       });
   }
 
-  async function loadMoreCandidates() {
+  const loadMoreCandidates = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const data = await api.getDiscovery(nextCursor);
+      const data = await api.getDiscovery(nextCursor, PAGE_SIZE, debouncedSearchQuery || undefined);
       const items = Array.isArray(data) ? data : data.items || [];
       setCandidates((prev) => [...prev, ...items]);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
 
-      // Preload next batch of photos
       const photoUrls = items.flatMap((c: Candidate) => (c.photos || []).map((p: any) => p.url)).filter(Boolean);
       preloadImages(photoUrls);
 
-      // Query presence for newly appended candidates
       queryCandidatesPresence(items);
+      resolveCitiesForCandidates(items);
     } catch (err) {
       console.error('Failed to load more candidates:', err);
     } finally {
       setLoadingMore(false);
     }
-  }
+  }, [nextCursor, loadingMore, debouncedSearchQuery]);
+
+  const [hasScrolled, setHasScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (window.scrollY > 30) {
+        setHasScrolled(true);
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Automatic infinite scroll only when user actively scrolls near bottom
+  useEffect(() => {
+    const target = observerTarget.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading && hasScrolled) {
+          loadMoreCandidates();
+        }
+      },
+      {
+        rootMargin: '100px',
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(target);
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasMore, loadingMore, loading, hasScrolled, loadMoreCandidates]);
 
   async function handleToggleLike(candidate: Candidate) {
     const isCurrentlyLiked = !!candidate.liked;
     const nextLikedState = !isCurrentlyLiked;
 
-    // Optimistically update UI
     setCandidates((prev) =>
       prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: nextLikedState } : c))
     );
@@ -238,10 +346,10 @@ export default function DiscoverPage() {
       if (nextLikedState) {
         await api.swipe(candidate.userId, 'LIKE');
         toast.success(`Matched with ${candidate.name}! ❤️`, {
-          description: 'You can now chat in Matches',
+          description: 'You can now chat anytime in Matches',
           action: {
-            label: 'View Matches',
-            onClick: () => (window.location.href = '/matches'),
+            label: 'Open Chat',
+            onClick: () => handleStartChat(candidate),
           },
         });
       } else {
@@ -250,7 +358,6 @@ export default function DiscoverPage() {
       }
     } catch (err) {
       console.error(err);
-      // Revert optimistic update on error
       setCandidates((prev) =>
         prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: isCurrentlyLiked } : c))
       );
@@ -264,9 +371,7 @@ export default function DiscoverPage() {
   async function handleStartChat(candidate: Candidate) {
     setStartingChat(true);
     try {
-      // Ensure match is created or retrieved
       const res = await api.swipe(candidate.userId, 'LIKE');
-      // Update local state if not already liked
       setCandidates((prev) =>
         prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: true } : c))
       );
@@ -293,7 +398,6 @@ export default function DiscoverPage() {
     setCurrentPhotoIndex(initialIndex);
     setSelectedCandidate(candidate);
 
-    // Immediate preload for candidate photos
     if (candidate.photos && candidate.photos.length > 0) {
       preloadImages(candidate.photos.map((p) => p.url));
     }
@@ -324,7 +428,6 @@ export default function DiscoverPage() {
     setTouchStartX(null);
   }
 
-  // Compute online and offline counts from discovered candidates
   const { onlineCandidates, offlineCandidates, onlineCount, offlineCount } = useMemo(() => {
     const online: Candidate[] = [];
     const offline: Candidate[] = [];
@@ -352,76 +455,130 @@ export default function DiscoverPage() {
   }, [statusFilter, candidates, onlineCandidates, offlineCandidates]);
 
   return (
-    <main className="w-full px-4 sm:px-8 py-8 min-h-[calc(100vh-4rem)] flex flex-col relative">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+    <main className="w-full px-4 sm:px-8 py-6 min-h-[calc(100vh-4rem)] flex flex-col relative">
+      {/* Top Header & Discovery Toolbar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight flex items-center gap-2.5">
-            <IconCompass className="text-rose-500 shrink-0" size={30} />
-            <span>Discover People</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-neutral-400 mt-1">
-            Tap or click any profile to view details, or hit the heart to match
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-md shadow-rose-500/20">
+              <IconCompass size={22} className="stroke-[2.2]" />
+            </span>
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              Discover
+            </h1>
+          </div>
+          <p className="text-xs text-neutral-400 mt-1">
+            Explore active profiles nearby, connect instantly, and start meaningful conversations.
           </p>
         </div>
 
-        {/* Controls: View Switcher and Status Dropdown side-by-side */}
-        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-          {/* View Switcher Dropdown Select */}
-          <div className="relative flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-2xl flex-shrink-0">
-            <span className="text-xs font-semibold text-neutral-400">View:</span>
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value as ViewMode)}
-              className="bg-transparent text-xs font-semibold text-white outline-none cursor-pointer pr-1"
-            >
-              <option value="grid5" className="bg-neutral-900 text-white hidden xl:block">Expanded Grid</option>
-              <option value="grid3" className="bg-neutral-900 text-white hidden md:block">Standard Grid</option>
-              <option value="grid2" className="bg-neutral-900 text-white md:hidden">Compact Grid</option>
-              <option value="grid1" className="bg-neutral-900 text-white md:hidden">Full Card View</option>
-              <option value="list" className="bg-neutral-900 text-white">List View</option>
-            </select>
+        {/* Toolbar Controls (Single Line on All Screens) */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 w-full md:w-auto flex-nowrap">
+          {/* Production Search Bar */}
+          <div className="relative flex-1 min-w-0 sm:w-64 md:w-72">
+            <IconSearch
+              size={15}
+              className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none transition-colors"
+            />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search..."
+              aria-label="Search profiles"
+              className="w-full bg-neutral-900/90 hover:bg-neutral-900 border border-neutral-800 focus:border-rose-500/60 text-white placeholder-neutral-500 text-xs font-medium pl-8 sm:pl-9 pr-6 sm:pr-8 py-2 sm:py-2.5 rounded-2xl outline-none transition-all shadow-inner focus:ring-2 focus:ring-rose-500/20"
+            />
+            {isSearching ? (
+              <div className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin pointer-events-none" />
+            ) : searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                title="Clear search"
+              >
+                <IconX size={12} />
+              </button>
+            ) : null}
           </div>
 
-          {/* Status Filter Dropdown Select (Beside View Switcher) */}
-          <div className="relative flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-2xl flex-shrink-0">
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-neutral-400">
-              {statusFilter === 'online' ? (
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-              ) : statusFilter === 'offline' ? (
-                <span className="h-2 w-2 rounded-full bg-neutral-500" />
-              ) : null}
-              <span>Status:</span>
-            </span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | 'online' | 'offline')}
-              className={`bg-transparent text-xs font-semibold outline-none cursor-pointer pr-1 ${
-                statusFilter === 'online'
-                  ? 'text-emerald-400 font-bold'
-                  : statusFilter === 'offline'
-                  ? 'text-neutral-300'
-                  : 'text-white'
-              }`}
+          {/* Status Filter Pill Selector */}
+          <div className="flex items-center p-0.5 sm:p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'all'
+                  ? 'bg-neutral-800 text-white shadow-sm font-semibold'
+                  : 'text-neutral-400 hover:text-neutral-200'
+                }`}
             >
-              <option value="all" className="bg-neutral-900 text-white">
-                All ({candidates.length})
-              </option>
-              <option value="online" className="bg-neutral-900 text-emerald-400 font-medium">
-                Online ({onlineCount})
-              </option>
-              <option value="offline" className="bg-neutral-900 text-neutral-300">
-                Offline ({offlineCount})
-              </option>
-            </select>
+              <span className="hidden sm:inline">All ({candidates.length})</span>
+              <span className="sm:hidden">All</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('online')}
+              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'online'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm font-semibold'
+                  : 'text-neutral-400 hover:text-emerald-400'
+                }`}
+            >
+              <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2 bg-emerald-500"></span>
+              </span>
+              <span className="hidden sm:inline">Online ({onlineCount})</span>
+              <span className="sm:hidden font-semibold">{onlineCount}</span>
+            </button>
+          </div>
+
+          {/* View Mode Switcher (Visible on mobile & desktop) */}
+          <div className="flex items-center p-0.5 sm:p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">
+            {/* Dense 5-Col Grid Option (Desktop only) */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid5')}
+              title="Expanded Grid (5 columns)"
+              className={`hidden md:block p-1.5 rounded-xl transition-all ${viewMode === 'grid5' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconGridDots size={16} />
+            </button>
+            {/* Full Card View Option (Mobile only) */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid1')}
+              title="Full Card View"
+              className={`md:hidden p-1.5 rounded-xl transition-all ${viewMode === 'grid1' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconSquare size={15} />
+            </button>
+            {/* Standard Grid Option */}
+            <button
+              type="button"
+              onClick={() => setViewMode('grid3')}
+              title="Standard Grid"
+              className={`p-1.5 rounded-xl transition-all ${viewMode === 'grid3' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconLayoutGrid size={15} />
+            </button>
+            {/* List View Option */}
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              title="List View"
+              className={`p-1.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
+            >
+              <IconList size={15} />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Stories Bar Tray */}
+      {/* Stories Tray */}
       <StoriesBar
         groups={storyGroups}
         loading={storiesLoading}
@@ -429,35 +586,55 @@ export default function DiscoverPage() {
         onOpenUpload={() => setIsUploadStoryOpen(true)}
       />
 
+      {/* Main Discover Grid / List Feed */}
       {loading ? (
         <DiscoverSkeleton viewMode={viewMode} />
       ) : displayedCandidates.length === 0 ? (
         <div className="flex-1 flex items-center justify-center py-20">
-          <div className="text-center p-8 bg-neutral-900/60 border border-neutral-800 rounded-3xl max-w-sm">
-            <IconSparkles size={40} className="text-amber-400 mx-auto mb-3" />
-            <h3 className="text-lg font-semibold text-white">
-              {statusFilter === 'online'
-                ? 'No Online Users Right Now'
-                : statusFilter === 'offline'
-                ? 'No Offline Users'
-                : 'No Profiles Found'}
+          <div className="text-center p-8 bg-neutral-900/60 border border-neutral-800/80 rounded-3xl max-w-sm backdrop-blur-md">
+            {debouncedSearchQuery ? (
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto mb-3 border border-rose-500/20">
+                <IconSearch size={24} />
+              </div>
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-3 border border-amber-500/20">
+                <IconSparkles size={24} />
+              </div>
+            )}
+            <h3 className="text-base font-bold text-white">
+              {debouncedSearchQuery
+                ? `No results for "${debouncedSearchQuery}"`
+                : statusFilter === 'online'
+                  ? 'No Online Users Right Now'
+                  : statusFilter === 'offline'
+                    ? 'No Offline Users'
+                    : 'No Profiles Found'}
             </h3>
-            <p className="text-neutral-400 text-xs mt-1">
-              {statusFilter !== 'all'
-                ? `There are no users currently ${statusFilter}. Try switching back to All.`
-                : 'No profiles available right now. Check back later or refresh feed.'}
+            <p className="text-neutral-400 text-xs mt-1.5 leading-relaxed">
+              {debouncedSearchQuery
+                ? 'Try checking for typos or searching by a different name, hobby, or keyword.'
+                : statusFilter !== 'all'
+                  ? `There are no users currently ${statusFilter}. Try switching back to All.`
+                  : 'No profiles available right now. Check back later or refresh feed.'}
             </p>
-            {statusFilter !== 'all' ? (
+            {debouncedSearchQuery ? (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="mt-4 px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:opacity-90 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-rose-950/40 cursor-pointer"
+              >
+                Clear Search
+              </button>
+            ) : statusFilter !== 'all' ? (
               <button
                 onClick={() => setStatusFilter('all')}
-                className="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl transition-colors"
+                className="mt-4 px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:opacity-90 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-rose-950/40 cursor-pointer"
               >
                 Show All Users ({candidates.length})
               </button>
             ) : (
               <button
-                onClick={fetchCandidates}
-                className="mt-4 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-xl transition-colors"
+                onClick={() => fetchCandidates()}
+                className="mt-4 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-xl transition-colors cursor-pointer"
               >
                 Refresh Feed
               </button>
@@ -465,22 +642,22 @@ export default function DiscoverPage() {
           </div>
         </div>
       ) : (
-        /* Dynamic Grid/List Container */
         <div
           className={
             viewMode === 'grid5'
-              ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
+              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-5'
               : viewMode === 'grid3'
-                ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
+                ? 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6'
                 : viewMode === 'grid2'
-                  ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
+                  ? 'grid grid-cols-2 gap-3 max-w-3xl mx-auto w-full'
                   : viewMode === 'grid1'
                     ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-                    : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
+                    : 'flex flex-col gap-3 max-w-4xl mx-auto w-full'
           }
         >
           {displayedCandidates.map((candidate) => {
-            const { cleanBio, interests } = parseBioContent(candidate.bio);
+            const { cleanBio, interests, city } = parseBioContent(candidate.bio);
+            const candidateCity = city || candidateCities[candidate.userId] || '';
             const photosList = candidate.photos && candidate.photos.length > 0 ? candidate.photos : [];
             const activePhotoIdx = cardPhotoIndexes[candidate.userId] || 0;
             const currentPhotoUrl = photosList[activePhotoIdx]?.url || photosList[0]?.url;
@@ -495,12 +672,12 @@ export default function DiscoverPage() {
                     preloadImages(candidate.photos.map((p) => p.url));
                   }
                 }}
-                className={`group relative bg-neutral-900 border border-neutral-800/80 hover:border-rose-500/50 rounded-3xl overflow-hidden shadow-xl transition-all duration-300 cursor-pointer ${viewMode === 'list'
-                  ? 'flex flex-row items-center p-3 gap-4 w-full'
-                  : 'flex flex-col w-full'
+                className={`group relative bg-neutral-900/90 border border-neutral-800/80 hover:border-neutral-700 hover:shadow-[0_12px_30px_-10px_rgba(0,0,0,0.8)] rounded-2xl sm:rounded-3xl overflow-hidden transition-all duration-300 cursor-pointer ${viewMode === 'list'
+                    ? 'flex flex-row items-center p-2.5 sm:p-3 gap-3 sm:gap-4 w-full'
+                    : 'w-full aspect-[3/4] flex flex-col'
                   }`}
               >
-                {/* Photo & Cover */}
+                {/* Photo & Cover Container */}
                 <div
                   onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
                   onTouchEnd={(e) =>
@@ -511,22 +688,21 @@ export default function DiscoverPage() {
                       () => cycleCardPhoto(candidate.userId, photosList.length, 'prev')
                     )
                   }
-                  className={`relative bg-neutral-800 overflow-hidden ${viewMode === 'list'
-                    ? `w-20 h-20 sm:w-24 sm:h-24 rounded-2xl flex-shrink-0 ${
-                        activity.statusText === 'Online now'
-                          ? 'ring-2 ring-emerald-500/80'
-                          : 'ring-1 ring-neutral-700/60'
+                  className={`bg-neutral-950 overflow-hidden ${viewMode === 'list'
+                      ? `relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shrink-0 ${activity.statusText === 'Online now'
+                        ? 'ring-2 ring-emerald-500/80'
+                        : 'ring-1 ring-neutral-700/60'
                       }`
-                    : 'aspect-[3/4] w-full'
+                      : 'relative w-full h-full absolute inset-0'
                     }`}
                 >
-                  {/* Photo Story Progress Bars */}
+                  {/* Photo Progress Bars */}
                   {photosList.length > 1 && viewMode !== 'list' && (
-                    <div className="absolute top-2.5 inset-x-3 flex gap-1 z-30 pointer-events-none">
+                    <div className="absolute top-2 inset-x-2 sm:top-2.5 sm:inset-x-3 flex gap-1 z-30 pointer-events-none">
                       {photosList.map((_: any, idx: number) => (
                         <div
                           key={idx}
-                          className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx === activePhotoIdx ? 'bg-white shadow-md' : 'bg-white/35'
+                          className={`h-0.5 sm:h-1 flex-1 rounded-full transition-all duration-300 ${idx === activePhotoIdx ? 'bg-white shadow' : 'bg-white/30'
                             }`}
                         />
                       ))}
@@ -538,160 +714,141 @@ export default function DiscoverPage() {
                     <img
                       src={currentPhotoUrl}
                       alt={candidate.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
-                      <IconUser size={64} stroke={1.5} />
+                    <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
+                      <IconUser size={48} stroke={1.5} />
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-950/20 to-transparent opacity-90 pointer-events-none" />
+
+                  {/* Clean Scrim Gradient */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent pointer-events-none" />
+
+                  {/* Top Left Live Status Pill - Online Only on Grid Views */}
+                  {viewMode !== 'list' && activity.statusText === 'Online now' && (
+                    <div className="absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-20 flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full bg-black/60 border border-emerald-500/30 backdrop-blur-md">
+                      <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="text-[9px] sm:text-[10px] font-semibold tracking-wide text-emerald-300">
+                        Online
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Subtle online status indicator dot on avatar in list view */}
+                  {viewMode === 'list' && activity.statusText === 'Online now' && (
+                    <span className="absolute bottom-1 right-1 w-3 h-3 bg-emerald-500 border-2 border-neutral-900 rounded-full z-20 shadow-md" />
+                  )}
 
                   {/* Left / Right Photo Arrows for Card */}
                   {photosList.length > 1 && viewMode !== 'list' && (
                     <>
                       <button
                         type="button"
-                        onClick={(e) => cycleCardPhoto(candidate.userId, photosList.length, 'prev', e)}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cycleCardPhoto(candidate.userId, photosList.length, 'prev');
+                        }}
+                        className="absolute left-1.5 sm:left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 rounded-full bg-black/50 border border-white/15 text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
                         title="Previous photo"
+                        aria-label="Previous photo"
                       >
-                        <IconChevronLeft size={16} />
+                        <IconChevronLeft size={14} />
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => cycleCardPhoto(candidate.userId, photosList.length, 'next', e)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          cycleCardPhoto(candidate.userId, photosList.length, 'next');
+                        }}
+                        className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 rounded-full bg-black/50 border border-white/15 text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
                         title="Next photo"
+                        aria-label="Next photo"
                       >
-                        <IconChevronRight size={16} />
+                        <IconChevronRight size={14} />
                       </button>
                     </>
                   )}
 
-                  {/* Online / Active Status Badge on Card (Top Left for Grid modes only) */}
-                  {viewMode !== 'list' && (
-                    <div className="absolute top-3.5 left-3.5 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 shadow-lg">
-                      <span className={`w-2 h-2 rounded-full ${activity.dotClass}`} />
-                      <span className={`text-[10px] font-medium ${activity.textClass}`}>
-                        {activity.statusText}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Match Heart Icon - Visible in Grid Modes only */}
+                  {/* Clean Match Heart Action */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggleLike(candidate);
                     }}
-                    title={candidate.liked ? 'Matched! Click to unmatch' : 'Click heart to match'}
+                    title={candidate.liked ? 'Matched! Click to unmatch' : 'Click to match'}
                     aria-label={`Match ${candidate.name}`}
-                    className={`absolute top-3.5 right-3.5 z-20 transition-all duration-300 transform active:scale-90 cursor-pointer drop-shadow-md ${viewMode === 'list' ? 'hidden' : ''
+                    className={`absolute top-2 right-2 sm:top-3.5 sm:right-3.5 z-20 transition-all duration-300 transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-md ${viewMode === 'list' ? 'hidden' : ''
                       } ${candidate.liked
-                        ? 'text-rose-500 opacity-100 scale-100 drop-shadow-[0_2px_10px_rgba(244,63,94,0.7)]'
-                        : 'text-white/90 hover:text-rose-500 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 scale-100 sm:scale-90 sm:group-hover:scale-100 hover:drop-shadow-[0_2px_10px_rgba(244,63,94,0.5)]'
+                        ? 'text-rose-500 opacity-100 drop-shadow-[0_2px_12px_rgba(244,63,94,0.8)]'
+                        : 'text-white/90 hover:text-rose-400 opacity-90 sm:opacity-0 sm:group-hover:opacity-100'
                       }`}
                   >
                     {candidate.liked ? (
-                      <IconHeartFilled size={28} className="animate-pulse" />
+                      <IconHeartFilled size={22} className="animate-pulse text-rose-500 sm:w-6 sm:h-6" />
                     ) : (
-                      <IconHeart size={28} className="stroke-[2.2] hover:fill-rose-500 transition-colors" />
+                      <IconHeart size={22} className="stroke-[2.2] sm:w-6 sm:h-6" />
                     )}
                   </button>
 
-                  {/* Candidate Information Overlay */}
+                  {/* Candidate Information Bottom Overlay */}
                   <div
                     className={
                       viewMode === 'list'
                         ? 'hidden'
-                        : 'absolute bottom-0 left-0 right-0 p-4 text-white pointer-events-none'
+                        : 'absolute bottom-0 left-0 right-0 p-2.5 sm:p-4 text-white pointer-events-none z-20'
                     }
                   >
-                    <h3 className="text-lg font-bold tracking-wide flex items-center gap-2">
-                      <span>{candidate.name}</span>
-                    </h3>
-                    <div className="flex items-center gap-1 text-xs text-neutral-300 mt-0.5">
-                      <IconMapPin size={13} className="text-rose-400" />
-                      <span>
-                        {candidate.distance_km != null && candidate.distance_km > 0
-                          ? `${candidate.distance_km.toFixed(1)} km away`
-                          : 'Nearby'}
+                    <div className="flex items-center gap-1 sm:gap-1.5">
+                      <h3 className="text-xs sm:text-base font-bold tracking-tight truncate text-white">
+                        {candidate.name}
+                      </h3>
+                      <IconCircleCheckFilled size={13} className="text-rose-400 shrink-0 sm:w-4 sm:h-4" />
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-300/90 mt-0.5">
+                      <IconMapPin size={11} className="text-rose-400 shrink-0" />
+                      <span className="truncate font-medium">
+                        {candidateCity
+                          ? `${candidateCity}${candidate.distance_km != null && candidate.distance_km > 0 ? ` • ${candidate.distance_km.toFixed(1)} km` : ''}`
+                          : candidate.distance_km != null && candidate.distance_km > 0
+                            ? `${candidate.distance_km.toFixed(1)} km`
+                            : 'Nearby'}
                       </span>
                     </div>
-
-                    {cleanBio && (
-                      <p className="text-xs text-neutral-300/90 mt-1.5 line-clamp-2 leading-relaxed">
-                        {cleanBio}
-                      </p>
-                    )}
-
-                    {/* Interest Pills */}
-                    {interests.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {interests.slice(0, 3).map((tag) => (
-                          <span
-                            key={tag}
-                            className="px-2 py-0.5 rounded-full bg-white/15 border border-white/20 text-[10px] font-medium backdrop-blur-md text-white"
-                          >
-                            {INTEREST_LABELS[tag] || tag}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 </div>
 
-                {/* Dedicated List View Content Section */}
+                {/* List View Details */}
                 {viewMode === 'list' && (
-                  <div className="flex-1 flex items-center justify-between min-w-0 pr-1">
+                  <div className="flex-1 flex items-center justify-between min-w-0 pr-1 z-10">
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                        <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                          {candidate.name}
+                        <h3 className="text-sm sm:text-base font-bold text-white truncate flex items-center gap-1.5">
+                          <span>{candidate.name}</span>
+                          <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
                         </h3>
-                        {/* Clean Status Pill with glowing indicator */}
                         <span
-                          className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold px-2.5 py-0.5 rounded-full border transition-all ${
-                            activity.statusText === 'Online now'
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                              : 'bg-neutral-800/80 border-neutral-700/60 text-neutral-400'
-                          }`}
+                          className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold px-2.5 py-0.5 rounded-full border transition-all ${activity.statusText === 'Online now'
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            : 'bg-neutral-800/80 border-neutral-700/60 text-neutral-400'
+                            }`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${activity.dotClass}`} />
                           <span>{activity.statusText}</span>
                         </span>
                       </div>
 
-                      {/* Distance */}
-                      <div className="flex items-center gap-1 text-[11px] sm:text-xs text-neutral-400">
+                      <div className="flex items-center gap-1.5 text-xs text-neutral-400">
                         <IconMapPin size={12} className="text-rose-400 shrink-0" />
-                        <span className="truncate">
-                          {candidate.distance_km != null && candidate.distance_km > 0
-                            ? `${candidate.distance_km.toFixed(1)} km away`
-                            : 'Nearby'}
+                        <span className="truncate font-medium">
+                          {candidateCity
+                            ? `${candidateCity}${candidate.distance_km != null && candidate.distance_km > 0 ? ` • ${candidate.distance_km.toFixed(1)} km away` : ''}`
+                            : candidate.distance_km != null && candidate.distance_km > 0
+                              ? `${candidate.distance_km.toFixed(1)} km away`
+                              : 'Nearby'}
                         </span>
                       </div>
-
-                      {cleanBio && (
-                        <p className="text-xs text-neutral-300 line-clamp-1 truncate max-w-sm sm:max-w-md">
-                          {cleanBio}
-                        </p>
-                      )}
-
-                      {interests.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-0.5">
-                          {interests.slice(0, 3).map((tag) => (
-                            <span
-                              key={tag}
-                              className="px-2 py-0.5 rounded-md bg-neutral-800/90 border border-neutral-700/60 text-[10px] font-medium text-neutral-300"
-                            >
-                              {INTEREST_LABELS[tag] || tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </div>
 
                     <button
@@ -700,13 +857,16 @@ export default function DiscoverPage() {
                         e.stopPropagation();
                         handleToggleLike(candidate);
                       }}
-                      title={candidate.liked ? 'Matched! Click to unmatch' : 'Click heart to match'}
-                      className="p-2.5 sm:p-3 rounded-2xl bg-neutral-800/80 hover:bg-neutral-700 border border-neutral-700/60 hover:border-rose-500/50 transition-all ml-2.5 shrink-0 cursor-pointer active:scale-90"
+                      title={candidate.liked ? 'Matched! Click to unmatch' : 'Click to match'}
+                      className={`p-2.5 rounded-2xl border transition-all ml-2.5 shrink-0 cursor-pointer active:scale-90 ${candidate.liked
+                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-500 shadow-sm'
+                        : 'bg-neutral-800/80 hover:bg-neutral-700 border-neutral-700/60 text-neutral-400 hover:text-rose-400'
+                        }`}
                     >
                       {candidate.liked ? (
-                        <IconHeartFilled size={22} className="text-rose-500 animate-pulse" />
+                        <IconHeartFilled size={20} className="text-rose-500 animate-pulse" />
                       ) : (
-                        <IconHeart size={22} className="text-neutral-400 hover:text-rose-500 transition-colors" />
+                        <IconHeart size={20} />
                       )}
                     </button>
                   </div>
@@ -717,21 +877,32 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {hasMore && (
+      {/* Infinite Scroll Sentinel */}
+      <div ref={observerTarget} className="w-full h-8 pointer-events-none" />
+
+      {/* Skeleton Loading on Scroll Down */}
+      {loadingMore && (
+        <div className="mt-4">
+          <DiscoverSkeleton viewMode={viewMode} count={viewMode === 'grid5' ? 5 : viewMode === 'grid3' ? 3 : 2} />
+        </div>
+      )}
+
+      {/* Pagination Load More */}
+      {hasMore && !loadingMore && (
         <div className="mt-8 text-center">
           <button
             onClick={loadMoreCandidates}
-            disabled={loadingMore}
-            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-rose-500/50 text-neutral-200 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all disabled:opacity-50"
+            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all cursor-pointer"
           >
-            {loadingMore ? 'Loading profiles...' : 'Load More Profiles'}
+            Load More Profiles
           </button>
         </div>
       )}
 
-      {/* Candidate Full Profile Detail Modal */}
+      {/* Production-Grade Candidate Profile Detail Modal */}
       {selectedCandidate && (() => {
-        const { cleanBio, interests } = parseBioContent(selectedCandidate.bio);
+        const { cleanBio, interests, city: modalCityFromBio } = parseBioContent(selectedCandidate.bio);
+        const modalCity = modalCityFromBio || candidateCities[selectedCandidate.userId] || '';
         const photosList = selectedCandidate.photos && selectedCandidate.photos.length > 0
           ? selectedCandidate.photos
           : [];
@@ -739,19 +910,24 @@ export default function DiscoverPage() {
         const modalActivity = formatUserActivity(selectedCandidate.userId, null, onlineUserIds, lastActiveMap);
 
         return (
-          <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-lg flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-            <div className="relative w-full max-w-3xl bg-neutral-900/95 border border-neutral-800/90 rounded-3xl overflow-y-auto md:overflow-hidden shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9)] my-auto flex flex-col md:flex-row max-h-[85vh] sm:max-h-[90vh] md:h-[540px]">
-              
+          <div
+            className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelectedCandidate(null);
+            }}
+          >
+            <div className="relative w-full max-w-lg md:max-w-3xl bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl flex flex-col md:flex-row max-h-[92vh] md:h-[540px] overflow-y-auto md:overflow-hidden my-auto">
+
               {/* Close Button */}
               <button
                 onClick={() => setSelectedCandidate(null)}
-                className="absolute top-3.5 right-3.5 z-40 p-2.5 rounded-full bg-black/60 border border-white/15 text-white/80 hover:text-white hover:bg-neutral-800 transition-all cursor-pointer backdrop-blur-md shadow-lg"
-                title="Close"
+                className="absolute top-3.5 right-3.5 z-40 p-2 rounded-full bg-black/60 border border-white/10 text-white/80 hover:text-white hover:bg-black/90 transition-all cursor-pointer backdrop-blur-md shadow-lg"
+                title="Close modal"
               >
-                <IconX size={20} />
+                <IconX size={18} />
               </button>
 
-              {/* LEFT COLUMN: Photo Gallery (Preserving original 3:4 aspect ratio) */}
+              {/* LEFT HALF / TOP ON MOBILE: Interactive Photo Showcase */}
               <div
                 onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
                 onTouchEnd={(e) =>
@@ -762,52 +938,35 @@ export default function DiscoverPage() {
                     () => setCurrentPhotoIndex((prev) => (prev > 0 ? prev - 1 : photosList.length - 1))
                   )
                 }
-                className="relative w-full md:w-1/2 aspect-[15/16] md:aspect-auto md:h-full bg-neutral-950 shrink-0 overflow-hidden group select-none cursor-pointer"
+                className="relative w-full md:w-1/2 aspect-[4/5] md:aspect-auto md:h-full bg-neutral-950 shrink-0 overflow-hidden group select-none"
               >
-                {/* Story Navigation Top Bars */}
+                {/* Photo Story Bars */}
                 {photosList.length > 1 && (
                   <div className="absolute top-3 inset-x-3 flex gap-1 z-30 pointer-events-none">
                     {photosList.map((_: any, idx: number) => (
                       <div
                         key={idx}
-                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                          idx === currentPhotoIndex ? 'bg-white shadow' : 'bg-white/30'
-                        }`}
+                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx === currentPhotoIndex ? 'bg-white shadow' : 'bg-white/30'
+                          }`}
                       />
                     ))}
                   </div>
                 )}
 
                 {currentPhotoUrl ? (
-                  <div className="relative w-full h-full">
-                    {/* Shimmer Skeleton & Spinner while image loads */}
-                    {modalImgLoading && (
-                      <div className="absolute inset-0 bg-neutral-900 animate-pulse flex flex-col items-center justify-center text-neutral-600 z-10">
-                        <div className="w-10 h-10 rounded-full border-2 border-rose-500/30 border-t-rose-500 animate-spin mb-2.5" />
-                        <span className="text-[11px] text-neutral-400 font-medium">Loading photo...</span>
-                      </div>
-                    )}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      key={currentPhotoUrl}
-                      src={currentPhotoUrl}
-                      alt={selectedCandidate.name}
-                      loading="eager"
-                      decoding="async"
-                      onLoad={() => setModalImgLoading(false)}
-                      onError={() => setModalImgLoading(false)}
-                      className={`w-full h-full object-cover group-hover:scale-105 transition-all duration-300 ${
-                        modalImgLoading ? 'opacity-0 scale-95' : 'opacity-100 scale-100 animate-in fade-in-50'
-                      }`}
-                    />
-                  </div>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={currentPhotoUrl}
+                    alt={selectedCandidate.name}
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
-                    <IconUser size={72} stroke={1.5} />
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-900 text-neutral-600 min-h-[300px]">
+                    <IconUser size={64} stroke={1.5} />
                   </div>
                 )}
 
-                {/* Photo Gallery Left/Right Floating Arrows */}
+                {/* Left/Right Photo Browsing Arrows */}
                 {photosList.length > 1 && (
                   <>
                     <button
@@ -815,7 +974,7 @@ export default function DiscoverPage() {
                         e.stopPropagation();
                         setCurrentPhotoIndex((prev) => (prev > 0 ? prev - 1 : photosList.length - 1));
                       }}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/40 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 hover:scale-110 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg hover:scale-105"
                       title="Previous photo"
                     >
                       <IconChevronLeft size={18} />
@@ -826,7 +985,7 @@ export default function DiscoverPage() {
                         e.stopPropagation();
                         setCurrentPhotoIndex((prev) => (prev < photosList.length - 1 ? prev + 1 : 0));
                       }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/40 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 hover:scale-110 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg hover:scale-105"
                       title="Next photo"
                     >
                       <IconChevronRight size={18} />
@@ -834,7 +993,7 @@ export default function DiscoverPage() {
                   </>
                 )}
 
-                {/* Photo Count Tag */}
+                {/* Photo Badge Count */}
                 {photosList.length > 1 && (
                   <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-bold text-white/90 backdrop-blur-md z-20">
                     {currentPhotoIndex + 1} / {photosList.length}
@@ -842,60 +1001,65 @@ export default function DiscoverPage() {
                 )}
               </div>
 
-              {/* RIGHT COLUMN: Candidate Details & Actions */}
-              <div className="w-full md:w-1/2 p-5 sm:p-6 md:p-8 flex flex-col justify-between overflow-y-auto space-y-4 bg-neutral-900/90 text-white shrink-0 md:shrink md:overflow-y-auto">
-                <div className="space-y-4">
-                  {/* Name & Title Row */}
-                  <div className="pr-10">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight text-white truncate">
+              {/* RIGHT HALF / BOTTOM ON MOBILE: Profile Details & Sticky Actions */}
+              <div className="w-full md:w-1/2 flex flex-col justify-between md:overflow-y-auto bg-neutral-900 text-white">
+                <div className="p-5 sm:p-6 md:p-7 space-y-4">
+                  {/* Name, Verified Badge & Status */}
+                  <div className="pr-8">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-2xl font-bold tracking-tight text-white truncate">
                         {selectedCandidate.name}
                       </h2>
-                      {selectedCandidate.liked && (
-                        <span className="px-3 py-1 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide uppercase border border-rose-500/60 bg-rose-950/60 text-rose-300 shadow-sm shadow-rose-950/50 shrink-0">
-                          Matched ❤️
-                        </span>
-                      )}
+                      <IconCircleCheckFilled size={20} className="text-rose-400 shrink-0" />
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 mt-2">
-                      {/* Distance */}
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold">
-                        <IconMapPin size={14} />
+                      {/* Location Pill */}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-800/80 border border-neutral-700/60 text-neutral-300 text-xs font-medium">
+                        <IconMapPin size={13} className="text-rose-400 shrink-0" />
                         <span>
-                          {selectedCandidate.distance_km != null && selectedCandidate.distance_km > 0
-                            ? `${selectedCandidate.distance_km.toFixed(1)} km away`
-                            : 'Nearby Profile'}
+                          {modalCity
+                            ? `${modalCity}${selectedCandidate.distance_km != null && selectedCandidate.distance_km > 0
+                              ? ` • ${selectedCandidate.distance_km.toFixed(1)} km away`
+                              : ''
+                            }`
+                            : selectedCandidate.distance_km != null && selectedCandidate.distance_km > 0
+                              ? `${selectedCandidate.distance_km.toFixed(1)} km away`
+                              : 'Nearby'}
                         </span>
                       </span>
 
-                      {/* Online / Active Status Badge */}
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-950 border border-neutral-800 text-xs font-semibold">
+                      {/* Online Status Badge */}
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-800/80 border border-neutral-700/60 text-xs font-medium">
                         <span className={`w-2 h-2 rounded-full ${modalActivity.dotClass}`} />
                         <span className={modalActivity.textClass}>{modalActivity.statusText}</span>
                       </span>
                     </div>
                   </div>
 
-                  {/* Bio / About */}
+                  {/* Clean Hinge-Style About Card */}
                   {cleanBio && (
                     <div className="space-y-1.5">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400">About</span>
-                      <p className="text-xs sm:text-sm text-neutral-200 leading-relaxed bg-neutral-950/80 border-l-4 border-rose-500 border-neutral-800/80 p-3.5 sm:p-4 rounded-2xl shadow-inner break-words">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                        About
+                      </span>
+                      <div className="bg-neutral-800/40 border border-neutral-700/40 p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm text-neutral-200 leading-relaxed break-words">
                         {cleanBio}
-                      </p>
+                      </div>
                     </div>
                   )}
 
-                  {/* Passions / Interests */}
+                  {/* Passions / Interests Chips */}
                   {interests.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Passions</span>
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                        Passions
+                      </span>
                       <div className="flex flex-wrap gap-1.5">
                         {interests.map((tag) => (
                           <span
                             key={tag}
-                            className="px-3 py-1.5 rounded-xl bg-neutral-950 border border-neutral-800 text-xs font-semibold text-neutral-300 shadow-sm"
+                            className="px-3 py-1 rounded-full bg-neutral-800/60 border border-neutral-700/50 text-xs font-medium text-neutral-300 shadow-sm"
                           >
                             {INTEREST_LABELS[tag] || tag}
                           </span>
@@ -905,40 +1069,39 @@ export default function DiscoverPage() {
                   )}
                 </div>
 
-                {/* Action Buttons at Bottom */}
-                <div className="pt-3 border-t border-neutral-800/80 mt-auto shrink-0 flex items-center gap-2.5">
-                  {/* Match / Unmatch Button */}
+                {/* Sticky Bottom Action Footer */}
+                <div className="sticky bottom-0 bg-neutral-900/95 backdrop-blur-md p-4 sm:p-5 border-t border-neutral-800/80 mt-auto flex items-center gap-3 z-30">
+                  {/* Match Button */}
                   <button
                     type="button"
                     onClick={() => handleToggleLike(selectedCandidate)}
-                    className={`flex-1 py-3.5 sm:py-4 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xl active:scale-[0.98] ${
-                      selectedCandidate.liked
-                        ? 'bg-neutral-800 border border-rose-500/50 text-rose-400 hover:bg-rose-950/30'
-                        : 'bg-gradient-to-r from-rose-600 via-rose-500 to-amber-500 hover:opacity-95 text-white shadow-rose-950/60 hover:shadow-rose-900/80'
-                    }`}
+                    className={`flex-1 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-[0.98] ${selectedCandidate.liked
+                      ? 'bg-rose-500/15 border border-rose-500/40 text-rose-400 hover:bg-rose-500/25 shadow-rose-950/20'
+                      : 'bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 text-white shadow-rose-500/25'
+                      }`}
                   >
                     {selectedCandidate.liked ? (
                       <>
                         <IconHeartFilled size={18} className="text-rose-500 shrink-0" />
-                        <span className="truncate">Matched</span>
+                        <span>Matched</span>
                       </>
                     ) : (
                       <>
-                        <IconHeart size={18} className="fill-white/20 shrink-0" />
-                        <span className="truncate">Match</span>
+                        <IconHeart size={18} className="stroke-[2.2] shrink-0" />
+                        <span>Match</span>
                       </>
                     )}
                   </button>
 
-                  {/* Direct Chat Button */}
+                  {/* Chat Now Button */}
                   <button
                     type="button"
                     onClick={() => handleStartChat(selectedCandidate)}
                     disabled={startingChat}
-                    className="flex-1 py-3.5 sm:py-4 px-3 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xl bg-gradient-to-r from-neutral-800 to-neutral-700 hover:from-neutral-700 hover:to-neutral-600 border border-neutral-700/80 text-white hover:text-rose-400 active:scale-[0.98] disabled:opacity-50"
+                    className="flex-1 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/80 text-white active:scale-[0.98] disabled:opacity-50"
                   >
                     <IconMessageCircle2 size={18} className="text-rose-400 shrink-0" />
-                    <span className="truncate">{startingChat ? 'Opening Chat...' : 'Chat Now'}</span>
+                    <span>{startingChat ? 'Connecting...' : 'Chat Now'}</span>
                   </button>
                 </div>
               </div>

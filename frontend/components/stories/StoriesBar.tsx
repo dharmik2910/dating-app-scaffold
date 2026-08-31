@@ -39,6 +39,21 @@ export default function StoriesBar({
   onOpenUpload,
 }: StoriesBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = React.useState(false);
+  const [canScrollRight, setCanScrollRight] = React.useState(false);
+
+  const checkScrollability = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 10);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 10);
+  };
+
+  useEffect(() => {
+    checkScrollability();
+    window.addEventListener('resize', checkScrollability);
+    return () => window.removeEventListener('resize', checkScrollability);
+  }, [groups]);
 
   // Background prefetch first stories of each user for instant opening
   useEffect(() => {
@@ -56,6 +71,7 @@ export default function StoriesBar({
     if (scrollRef.current) {
       const scrollAmount = direction === 'left' ? -240 : 240;
       scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(checkScrollability, 300);
     }
   };
 
@@ -64,30 +80,36 @@ export default function StoriesBar({
 
   return (
     <div className="relative w-full mb-4 select-none">
-      {/* Scroll Arrows on Desktop */}
-      <button
-        type="button"
-        onClick={() => scroll('left')}
-        className="hidden md:flex absolute -left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-neutral-900/95 border border-neutral-700/90 text-white items-center justify-center shadow-xl hover:bg-rose-600 transition-all opacity-90 hover:opacity-100 hover:scale-110 cursor-pointer"
-        title="Scroll left"
-      >
-        <IconChevronLeft size={18} />
-      </button>
-      <button
-        type="button"
-        onClick={() => scroll('right')}
-        className="hidden md:flex absolute -right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-neutral-900/95 border border-neutral-700/90 text-white items-center justify-center shadow-xl hover:bg-rose-600 transition-all opacity-90 hover:opacity-100 hover:scale-110 cursor-pointer"
-        title="Scroll right"
-      >
-        <IconChevronRight size={18} />
-      </button>
+      {/* Scroll Arrows on Desktop (only visible when there is scroll overflow) */}
+      {canScrollLeft && (
+        <button
+          type="button"
+          onClick={() => scroll('left')}
+          className="hidden md:flex absolute -left-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-neutral-900/95 border border-neutral-700/90 text-white items-center justify-center shadow-2xl hover:bg-rose-600 transition-all opacity-95 hover:opacity-100 hover:scale-110 cursor-pointer"
+          title="Scroll left"
+        >
+          <IconChevronLeft size={18} />
+        </button>
+      )}
+      {canScrollRight && (
+        <button
+          type="button"
+          onClick={() => scroll('right')}
+          className="hidden md:flex absolute -right-2 top-1/2 -translate-y-1/2 z-30 w-8 h-8 rounded-full bg-neutral-900/95 border border-neutral-700/90 text-white items-center justify-center shadow-2xl hover:bg-rose-600 transition-all opacity-95 hover:opacity-100 hover:scale-110 cursor-pointer"
+          title="Scroll right"
+        >
+          <IconChevronRight size={18} />
+        </button>
+      )}
 
       {/* Stories Tray Scroll Container */}
       <div
         ref={scrollRef}
+        onScroll={checkScrollability}
         className="flex items-center gap-4 sm:gap-5 overflow-x-auto no-scrollbar py-1 px-1 scroll-smooth"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
+
         {/* 1. Self Story / Add Story Item */}
         <div className="flex flex-col items-center flex-shrink-0 cursor-pointer group">
           <div className="relative">

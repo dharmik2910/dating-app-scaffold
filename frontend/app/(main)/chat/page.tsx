@@ -24,6 +24,7 @@ import {
   IconChevronLeft,
   IconMessageCircle,
   IconTrash,
+  IconCompass,
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import ChatListSkeleton from '@/components/ChatListSkeleton';
@@ -331,24 +332,27 @@ export default function ConversationsPage() {
     });
 
   return (
-    <main className="w-full px-4 sm:px-8 py-4 min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] flex flex-col overflow-hidden">
+    <main className="w-full px-4 sm:px-8 py-4 min-h-[calc(100vh-4rem)] lg:h-[calc(100vh-4rem)] flex flex-col justify-center">
       {loading ? (
         <ChatListSkeleton />
       ) : matches.length === 0 ? (
-        <div className="text-center py-20 px-4 bg-neutral-900/40 border border-neutral-800/80 rounded-3xl max-w-md mx-auto shadow-xl">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4">
-            <IconSparkles size={32} />
+        <div className="flex-1 flex items-center justify-center py-12">
+          <div className="text-center py-14 px-8 bg-neutral-900/60 border border-neutral-800/80 rounded-3xl max-w-sm w-full mx-auto shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500/20 via-rose-500/10 to-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto mb-4 shadow-inner">
+              <IconSparkles size={32} className="animate-pulse" />
+            </div>
+            <h3 className="text-xl font-bold text-white tracking-tight">No Active Chats Yet</h3>
+            <p className="text-neutral-400 text-xs sm:text-sm mt-2 max-w-xs mx-auto mb-6 leading-relaxed">
+              Match with intriguing people in Discover to start chatting!
+            </p>
+            <Link
+              href="/discover"
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 font-bold text-xs sm:text-sm px-6 py-3.5 rounded-full text-white shadow-xl shadow-rose-500/25 hover:scale-105 active:scale-95 transition-all"
+            >
+              <IconCompass size={18} />
+              <span>Start Discovering</span>
+            </Link>
           </div>
-          <h3 className="text-lg font-bold text-white">No Active Chats Yet</h3>
-          <p className="text-neutral-400 text-xs mt-1.5 max-w-xs mx-auto mb-6 leading-relaxed">
-            Match with intriguing people in Discover to start chatting!
-          </p>
-          <Link
-            href="/discover"
-            className="inline-flex items-center gap-2 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 font-semibold text-xs px-6 py-3 rounded-full text-white shadow-lg shadow-rose-500/25 hover:scale-[1.02] active:scale-95 transition-all"
-          >
-            Start Discovering
-          </Link>
         </div>
       ) : (
         /* Split Dual-Pane View on Desktop / Laptop (lg+) */

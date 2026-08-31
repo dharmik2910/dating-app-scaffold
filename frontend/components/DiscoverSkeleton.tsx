@@ -8,7 +8,7 @@ interface DiscoverSkeletonProps {
 export default function DiscoverSkeleton({ viewMode = 'grid5', count }: DiscoverSkeletonProps) {
   const skeletonCount =
     count ??
-    (viewMode === 'grid5' ? 10 : viewMode === 'grid3' ? 6 : viewMode === 'grid2' ? 4 : viewMode === 'grid1' ? 3 : 5);
+    (viewMode === 'grid5' ? 15 : viewMode === 'grid3' ? 6 : viewMode === 'grid2' ? 4 : viewMode === 'grid1' ? 3 : 5);
 
   return (
     <div
@@ -16,20 +16,19 @@ export default function DiscoverSkeleton({ viewMode = 'grid5', count }: Discover
         viewMode === 'grid5'
           ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5'
           : viewMode === 'grid3'
-          ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
-          : viewMode === 'grid2'
-          ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
-          : viewMode === 'grid1'
-          ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-          : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
+            ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6'
+            : viewMode === 'grid2'
+              ? 'grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full'
+              : viewMode === 'grid1'
+                ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
+                : 'flex flex-col gap-3 max-w-3xl mx-auto w-full'
       }
     >
       {Array.from({ length: skeletonCount }).map((_, i) => (
         <div
           key={i}
-          className={`bg-neutral-900 border border-neutral-800/80 rounded-3xl overflow-hidden shadow-xl animate-pulse ${
-            viewMode === 'list' ? 'flex flex-row items-center p-3 gap-4 w-full' : 'flex flex-col w-full'
-          }`}
+          className={`bg-neutral-900 border border-neutral-800/80 rounded-3xl overflow-hidden shadow-xl animate-pulse ${viewMode === 'list' ? 'flex flex-row items-center p-3 gap-4 w-full' : 'flex flex-col w-full'
+            }`}
         >
           {viewMode === 'list' ? (
             <>

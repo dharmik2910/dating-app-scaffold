@@ -5,8 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class DiscoveryService {
   constructor(private prisma: PrismaService) { }
 
-  async getCandidates(userId: string, cursor?: string, limitStr?: string) {
-    const limit = Math.min(Math.max(parseInt(limitStr || '20', 10) || 20, 1), 50);
+  async getCandidates(userId: string, cursor?: string, limitStr?: string, query?: string) {
+    const limit = Math.min(Math.max(parseInt(limitStr || '15', 10) || 15, 1), 50);
 
     const swiped = await this.prisma.swipe.findMany({
       where: { swiperId: userId },
@@ -20,12 +20,22 @@ export class DiscoveryService {
     const meLat = me?.latitude ?? 0;
     const meLng = me?.longitude ?? 0;
 
-    const profiles = await this.prisma.profile.findMany({
-      where: {
-        userId: {
-          not: userId,
-        },
+    const trimmedQuery = query?.trim();
+    const whereClause: any = {
+      userId: {
+        not: userId,
       },
+    };
+
+    if (trimmedQuery) {
+      whereClause.OR = [
+        { name: { contains: trimmedQuery, mode: 'insensitive' } },
+        { bio: { contains: trimmedQuery, mode: 'insensitive' } },
+      ];
+    }
+
+    const profiles = await this.prisma.profile.findMany({
+      where: whereClause,
       include: {
         user: {
           include: {
@@ -68,10 +78,13 @@ export class DiscoveryService {
         name: p.name,
         bio: p.bio,
         gender: p.gender,
+        latitude: p.latitude,
+        longitude: p.longitude,
         distance_km: distanceKm,
         liked: likedSet.has(p.userId),
         photos: p.user.photos || [],
       };
+
     });
 
     return {

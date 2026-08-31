@@ -240,15 +240,15 @@ export default function ChatPage() {
   };
 
   return (
-    <main className="flex flex-col h-[calc(100vh-4rem)] max-w-2xl mx-auto bg-neutral-950 border-x border-neutral-900 shadow-2xl relative">
+    <main className="flex flex-col h-[calc(100dvh-4rem)] lg:h-[calc(100vh-4rem)] w-full max-w-2xl mx-auto bg-neutral-950 border-x border-neutral-900 shadow-2xl relative overflow-x-hidden min-w-0">
       {/* Header bar */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-neutral-800/80 bg-neutral-900/80 backdrop-blur-md sticky top-0 z-20 shadow-md">
+      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 border-b border-neutral-800/80 bg-neutral-900/80 backdrop-blur-md sticky top-0 z-20 shadow-md w-full min-w-0">
         <Link
           href="/chat"
-          className="p-2 -ml-2 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800/60 transition-colors"
+          className="p-1.5 sm:p-2 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800/60 transition-colors shrink-0"
           title="Back to conversations"
         >
-          <IconChevronLeft size={22} />
+          <IconChevronLeft size={20} />
         </Link>
 
         {/* Partner Profile Avatar */}
@@ -339,8 +339,8 @@ export default function ChatPage() {
       {loading ? (
         <ChatSkeleton />
       ) : messages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
-          <div className="p-6 bg-gradient-to-b from-neutral-900/80 to-neutral-900/40 border border-neutral-800/80 rounded-3xl max-w-sm shadow-xl backdrop-blur-sm">
+        <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 text-center overflow-y-auto overflow-x-hidden w-full">
+          <div className="p-4 sm:p-6 bg-gradient-to-b from-neutral-900/80 to-neutral-900/40 border border-neutral-800/80 rounded-3xl w-full max-w-sm shadow-xl backdrop-blur-sm">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-rose-500/20 to-amber-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto mb-3">
               <IconSparkles size={28} />
             </div>
@@ -481,10 +481,10 @@ export default function ChatPage() {
       )}
 
       {/* Input controls */}
-      <div className="border-t border-neutral-800/80 p-3 bg-neutral-900/60 backdrop-blur-md flex items-center gap-2">
+      <div className="border-t border-neutral-800/80 p-2.5 sm:p-3 bg-neutral-900/60 backdrop-blur-md flex items-center gap-2 w-full min-w-0">
         <button
           onClick={() => setShowEmojiPicker((prev) => !prev)}
-          className="p-2 text-neutral-400 hover:text-amber-400 rounded-full hover:bg-neutral-800 transition-colors shrink-0"
+          className="p-1.5 sm:p-2 text-neutral-400 hover:text-amber-400 rounded-full hover:bg-neutral-800 transition-colors shrink-0"
           title="Add Emoji"
         >
           <IconMoodSmile size={20} />
@@ -495,12 +495,12 @@ export default function ChatPage() {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           placeholder={`Message ${partner?.name || ''}...`}
-          className="flex-1 rounded-full bg-neutral-900/90 border border-neutral-800 px-4 py-2.5 text-xs sm:text-sm text-white outline-none focus:border-rose-500/60 transition-colors placeholder:text-neutral-500 shadow-inner"
+          className="flex-1 min-w-0 rounded-full bg-neutral-900/90 border border-neutral-800 px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm text-white outline-none focus:border-rose-500/60 transition-colors placeholder:text-neutral-500 shadow-inner"
         />
         <button
           onClick={() => sendMessage()}
           disabled={!text.trim()}
-          className="flex items-center justify-center gap-1 rounded-full bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-rose-500/20 disabled:opacity-30 transition-all cursor-pointer shrink-0"
+          className="flex items-center justify-center gap-1 rounded-full bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-white shadow-lg shadow-rose-500/20 disabled:opacity-30 transition-all cursor-pointer shrink-0"
         >
           <span className="hidden sm:inline">Send</span>
           <IconSend size={15} />

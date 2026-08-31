@@ -14,7 +14,8 @@ export class DiscoveryController {
     @CurrentUser() userId: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
+    @Query('q') query?: string,
   ) {
-    return this.discoveryService.getCandidates(userId, cursor, limit);
+    return this.discoveryService.getCandidates(userId, cursor, limit, query);
   }
 }
