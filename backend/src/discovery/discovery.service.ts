@@ -83,6 +83,7 @@ export class DiscoveryService {
         distance_km: distanceKm,
         liked: likedSet.has(p.userId),
         photos: p.user.photos || [],
+        lastActiveAt: p.updatedAt,
       };
 
     });

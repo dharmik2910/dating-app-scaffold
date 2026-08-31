@@ -128,7 +128,7 @@ export function formatUserActivity(
       isOnline: false,
       statusText: 'Active yesterday',
       dotClass: 'bg-neutral-600',
-      textClass: 'text-neutral-500',
+      textClass: 'text-neutral-400',
     };
   }
   if (diffDays < 7) {
@@ -136,7 +136,25 @@ export function formatUserActivity(
       isOnline: false,
       statusText: `Active ${diffDays}d ago`,
       dotClass: 'bg-neutral-600',
-      textClass: 'text-neutral-500',
+      textClass: 'text-neutral-400',
+    };
+  }
+  if (diffDays < 30) {
+    const diffWeeks = Math.floor(diffDays / 7);
+    return {
+      isOnline: false,
+      statusText: `Active ${diffWeeks}w ago`,
+      dotClass: 'bg-neutral-600',
+      textClass: 'text-neutral-400',
+    };
+  }
+  const diffMonths = Math.floor(diffDays / 30);
+  if (diffMonths < 12) {
+    return {
+      isOnline: false,
+      statusText: `Active ${diffMonths}mo ago`,
+      dotClass: 'bg-neutral-600',
+      textClass: 'text-neutral-400',
     };
   }
 
@@ -144,6 +162,6 @@ export function formatUserActivity(
     isOnline: false,
     statusText: 'Offline',
     dotClass: 'bg-neutral-600',
-    textClass: 'text-neutral-500',
+    textClass: 'text-neutral-400',
   };
 }

@@ -44,6 +44,7 @@ type Candidate = {
   longitude?: number;
   liked?: boolean;
   photos?: { id: string; url: string }[];
+  lastActiveAt?: string | Date;
 };
 
 const INTEREST_LABELS: Record<string, string> = {
@@ -182,14 +183,28 @@ export default function DiscoverPage() {
       fetchStories();
     };
 
+    const handleConnect = () => {
+      if (candidates.length > 0) {
+        queryCandidatesPresence(candidates);
+      }
+    };
+
+    const handleUserStatus = (data: { userId: string; isOnline: boolean; lastActiveAt?: string }) => {
+      usePresenceStore.getState().setUserStatus(data.userId, data.isOnline, data.lastActiveAt);
+    };
+
     socket.on('storyCreated', handleStoryEvent);
     socket.on('storyDeleted', handleStoryEvent);
     socket.on('storyViewed', handleStoryEvent);
+    socket.on('connect', handleConnect);
+    socket.on('userStatusChanged', handleUserStatus);
 
     return () => {
       socket.off('storyCreated', handleStoryEvent);
       socket.off('storyDeleted', handleStoryEvent);
       socket.off('storyViewed', handleStoryEvent);
+      socket.off('connect', handleConnect);
+      socket.off('userStatusChanged', handleUserStatus);
     };
   }, []);
 
@@ -508,8 +523,8 @@ export default function DiscoverPage() {
               type="button"
               onClick={() => setStatusFilter('all')}
               className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'all'
-                  ? 'bg-neutral-800 text-white shadow-sm font-semibold'
-                  : 'text-neutral-400 hover:text-neutral-200'
+                ? 'bg-neutral-800 text-white shadow-sm font-semibold'
+                : 'text-neutral-400 hover:text-neutral-200'
                 }`}
             >
               <span className="hidden sm:inline">All ({candidates.length})</span>
@@ -519,8 +534,8 @@ export default function DiscoverPage() {
               type="button"
               onClick={() => setStatusFilter('online')}
               className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'online'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm font-semibold'
-                  : 'text-neutral-400 hover:text-emerald-400'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm font-semibold'
+                : 'text-neutral-400 hover:text-emerald-400'
                 }`}
             >
               <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
@@ -661,7 +676,7 @@ export default function DiscoverPage() {
             const photosList = candidate.photos && candidate.photos.length > 0 ? candidate.photos : [];
             const activePhotoIdx = cardPhotoIndexes[candidate.userId] || 0;
             const currentPhotoUrl = photosList[activePhotoIdx]?.url || photosList[0]?.url;
-            const activity = formatUserActivity(candidate.userId, null, onlineUserIds, lastActiveMap);
+            const activity = formatUserActivity(candidate.userId, candidate.lastActiveAt, onlineUserIds, lastActiveMap);
 
             return (
               <div
@@ -673,8 +688,8 @@ export default function DiscoverPage() {
                   }
                 }}
                 className={`group relative bg-neutral-900/90 border border-neutral-800/80 hover:border-neutral-700 hover:shadow-[0_12px_30px_-10px_rgba(0,0,0,0.8)] rounded-2xl sm:rounded-3xl overflow-hidden transition-all duration-300 cursor-pointer ${viewMode === 'list'
-                    ? 'flex flex-row items-center p-2.5 sm:p-3 gap-3 sm:gap-4 w-full'
-                    : 'w-full aspect-[3/4] flex flex-col'
+                  ? 'flex flex-row items-center p-2.5 sm:p-3 gap-3 sm:gap-4 w-full'
+                  : 'w-full aspect-[3/4] flex flex-col'
                   }`}
               >
                 {/* Photo & Cover Container */}
@@ -689,11 +704,11 @@ export default function DiscoverPage() {
                     )
                   }
                   className={`bg-neutral-950 overflow-hidden ${viewMode === 'list'
-                      ? `relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shrink-0 ${activity.statusText === 'Online now'
-                        ? 'ring-2 ring-emerald-500/80'
-                        : 'ring-1 ring-neutral-700/60'
-                      }`
-                      : 'relative w-full h-full absolute inset-0'
+                    ? `relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shrink-0 ${activity.statusText === 'Online now'
+                      ? 'ring-2 ring-emerald-500/80'
+                      : 'ring-1 ring-neutral-700/60'
+                    }`
+                    : 'relative w-full h-full absolute inset-0'
                     }`}
                 >
                   {/* Photo Progress Bars */}
@@ -725,19 +740,35 @@ export default function DiscoverPage() {
                   {/* Clean Scrim Gradient */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent pointer-events-none" />
 
-                  {/* Top Left Live Status Pill - Online Only on Grid Views */}
-                  {viewMode !== 'list' && activity.statusText === 'Online now' && (
-                    <div className="absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-20 flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full bg-black/60 border border-emerald-500/30 backdrop-blur-md">
-                      <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span className="text-[9px] sm:text-[10px] font-semibold tracking-wide text-emerald-300">
-                        Online
+                  {/* Top Left Live Status Pill - Online & Offline on Grid Views */}
+                  {viewMode !== 'list' && (
+                    <div
+                      className={`absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-20 flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full backdrop-blur-md transition-all ${activity.isOnline
+                          ? 'bg-black/60 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                          : 'bg-black/50 border border-neutral-700/50 text-neutral-300'
+                        }`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${activity.isOnline
+                            ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]'
+                            : 'bg-neutral-500'
+                          }`}
+                      />
+                      <span
+                        className={`text-[9px] sm:text-[10px] font-semibold tracking-wide ${activity.isOnline ? 'text-emerald-300' : 'text-neutral-300'
+                          }`}
+                      >
+                        {activity.isOnline ? 'Online' : activity.statusText || 'Offline'}
                       </span>
                     </div>
                   )}
 
-                  {/* Subtle online status indicator dot on avatar in list view */}
-                  {viewMode === 'list' && activity.statusText === 'Online now' && (
-                    <span className="absolute bottom-1 right-1 w-3 h-3 bg-emerald-500 border-2 border-neutral-900 rounded-full z-20 shadow-md" />
+                  {/* Subtle online/offline status indicator dot on avatar in list view */}
+                  {viewMode === 'list' && (
+                    <span
+                      className={`absolute bottom-1 right-1 w-3 h-3 rounded-full border-2 border-neutral-900 z-20 shadow-md ${activity.isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-neutral-600'
+                        }`}
+                    />
                   )}
 
                   {/* Left / Right Photo Arrows for Card */}
@@ -907,7 +938,7 @@ export default function DiscoverPage() {
           ? selectedCandidate.photos
           : [];
         const currentPhotoUrl = photosList[Math.min(currentPhotoIndex, photosList.length - 1)]?.url;
-        const modalActivity = formatUserActivity(selectedCandidate.userId, null, onlineUserIds, lastActiveMap);
+        const modalActivity = formatUserActivity(selectedCandidate.userId, selectedCandidate.lastActiveAt, onlineUserIds, lastActiveMap);
 
         return (
           <div
