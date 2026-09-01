@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Lovora",
+    "slug": "dharmik",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/lovora.png",
+    "scheme": "mobile",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/lovora.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09090b"
+    },
+    "ios": {
+      "icon": "./assets/images/lovora.png",
+      "bundleIdentifier": "com.dharmik.datingapp"
+    },
+    "android": {
+      "package": "com.dharmik.datingapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/lovora.png",
+        "backgroundColor": "#09090b"
+      },
+      "usesCleartextTraffic": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/lovora.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#09090b",
+          "image": "./assets/images/lovora.png",
+          "imageWidth": 120
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "51466a06-aef9-4c04-b403-95afa770f20e"
+      }
+    },
+    "owner": "dharmik29102003s-team"
+  }
+}
