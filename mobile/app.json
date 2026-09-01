@@ -38,6 +38,14 @@
           "image": "./assets/images/lovora.png",
           "imageWidth": 120
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
       ]
     ],
     "experiments": {
