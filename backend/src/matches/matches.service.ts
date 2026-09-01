@@ -81,6 +81,8 @@ export class MatchesService {
           name: other?.profile?.name || 'User',
           photos: other?.photos || [],
           bio: other?.profile?.bio,
+          latitude: other?.profile?.latitude,
+          longitude: other?.profile?.longitude,
           updatedAt: other?.profile?.updatedAt || other?.updatedAt,
         },
       };

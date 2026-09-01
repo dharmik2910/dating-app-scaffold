@@ -9,7 +9,7 @@ export class UsersService {
   getProfile(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      include: { profile: true, photos: { orderBy: { order: 'asc' } } },
+      include: { profile: true, photos: { orderBy: { order: 'asc' }, take: 6 } },
     });
   }
 

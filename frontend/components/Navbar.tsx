@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { IconFlame, IconCompass, IconHeart, IconUser, IconLogout, IconMessages } from '@tabler/icons-react';
@@ -17,6 +18,40 @@ export default function Navbar({ user: propUser }: NavbarProps) {
   const user = propUser ?? authUser;
   const unreadMatchIds = useChatStore((state) => state.unreadMatchIds);
   const unreadCount = unreadMatchIds.length;
+
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    let lastScrollY = typeof window !== 'undefined' ? Math.max(0, window.scrollY) : 0;
+    let ticking = false;
+
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const currentScrollY = Math.max(0, window.scrollY);
+          const diff = currentScrollY - lastScrollY;
+
+          // Always visible near the top of the page
+          if (currentScrollY <= 15) {
+            setIsVisible(true);
+          } else if (diff > 3 && currentScrollY > 40) {
+            // Scrolling DOWN -> Hide menu / navbar
+            setIsVisible(false);
+          } else if (diff < 0) {
+            // Scrolling UP -> Reveal menu / navbar immediately
+            setIsVisible(true);
+          }
+
+          lastScrollY = currentScrollY;
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   function handleLogout() {
     logout();
@@ -49,8 +84,12 @@ export default function Navbar({ user: propUser }: NavbarProps) {
 
   return (
     <>
-      {/* Top Navbar (Desktop only) */}
-      <header className="hidden lg:block sticky top-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md">
+      {/* Top Navbar (Desktop only - Fixed to viewport top) */}
+      <header
+        className={`hidden lg:block fixed top-0 left-0 right-0 z-40 w-full border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md transition-transform duration-300 ease-in-out ${
+          isVisible ? 'translate-y-0' : '-translate-y-full pointer-events-none'
+        }`}
+      >
         <div className="flex h-16 w-full items-center justify-between px-4 sm:px-8">
           <Link href="/discover" className="flex items-center gap-2 group">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-ember to-rose-400 text-white shadow-lg shadow-ember/20 group-hover:scale-105 transition-transform">
@@ -107,7 +146,11 @@ export default function Navbar({ user: propUser }: NavbarProps) {
       </header>
 
       {/* Mobile & Tablet Bottom Navigation Bar (Shown up to lg screens) */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/90 backdrop-blur-lg px-6 py-2">
+      <div
+        className={`lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/90 backdrop-blur-lg px-6 py-2 transition-transform duration-300 ease-in-out ${
+          isVisible ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+        }`}
+      >
         <div className="flex justify-around items-center">
           {navItems.map((item) => {
             const Icon = item.icon;

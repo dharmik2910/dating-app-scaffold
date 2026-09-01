@@ -85,7 +85,28 @@ function parseBioContent(rawBio?: string) {
   return { cleanBio: cleanBio.trim(), interests, city };
 }
 
-const cityLookupCache: Record<string, string> = {};
+const CITY_CACHE_STORAGE_KEY = 'ember_city_lookup_cache';
+
+function getInitialCityCache(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(CITY_CACHE_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+let cityLookupCache: Record<string, string> = getInitialCityCache();
+
+function saveCityCache(key: string, label: string) {
+  cityLookupCache[key] = label;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(CITY_CACHE_STORAGE_KEY, JSON.stringify(cityLookupCache));
+    } catch {}
+  }
+}
 
 function preloadImages(urls: (string | undefined)[]) {
   if (typeof window === 'undefined') return;
@@ -128,6 +149,23 @@ export default function DiscoverPage() {
   const [activeStoryUserIdx, setActiveStoryUserIdx] = useState<number | null>(null);
   const [isUploadStoryOpen, setIsUploadStoryOpen] = useState<boolean>(false);
 
+  // Synchronously resolve known cities from bio or localStorage cache
+  function getCachedCitiesSync(items: Candidate[]): Record<string, string> {
+    const resolved: Record<string, string> = {};
+    for (const c of items) {
+      const { city } = parseBioContent(c.bio);
+      if (city) {
+        resolved[c.userId] = city;
+      } else if (c.latitude != null && c.longitude != null) {
+        const key = `${c.latitude.toFixed(3)},${c.longitude.toFixed(3)}`;
+        if (cityLookupCache[key]) {
+          resolved[c.userId] = cityLookupCache[key];
+        }
+      }
+    }
+    return resolved;
+  }
+
   // Debounce search query input (250ms)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -139,36 +177,37 @@ export default function DiscoverPage() {
   async function resolveCitiesForCandidates(items: Candidate[]) {
     const toLookup = items.filter((c) => {
       const { city } = parseBioContent(c.bio);
-      return !city && c.latitude != null && c.longitude != null;
+      if (city) return false;
+      if (c.latitude == null || c.longitude == null) return false;
+      const key = `${c.latitude.toFixed(3)},${c.longitude.toFixed(3)}`;
+      return !cityLookupCache[key];
     });
 
     if (toLookup.length === 0) return;
 
-    for (const c of toLookup) {
-      const key = `${c.latitude!.toFixed(3)},${c.longitude!.toFixed(3)}`;
-      if (cityLookupCache[key]) {
-        setCandidateCities((prev) => ({ ...prev, [c.userId]: cityLookupCache[key] }));
-        continue;
-      }
-
-      try {
-        const res = await fetch(
-          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${c.latitude}&longitude=${c.longitude}&localityLanguage=en`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const city = data.city || data.locality || data.principalSubdivision;
-          const country = data.countryName || data.countryCode;
-          const label = city ? (country ? `${city}, ${country}` : city) : '';
-          if (label) {
-            cityLookupCache[key] = label;
-            setCandidateCities((prev) => ({ ...prev, [c.userId]: label }));
+    // Fetch all uncached cities in parallel
+    await Promise.all(
+      toLookup.map(async (c) => {
+        const key = `${c.latitude!.toFixed(3)},${c.longitude!.toFixed(3)}`;
+        try {
+          const res = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${c.latitude}&longitude=${c.longitude}&localityLanguage=en`
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const city = data.city || data.locality || data.principalSubdivision;
+            const country = data.countryName || data.countryCode;
+            const label = city ? (country ? `${city}, ${country}` : city) : '';
+            if (label) {
+              saveCityCache(key, label);
+              setCandidateCities((prev) => ({ ...prev, [c.userId]: label }));
+            }
           }
+        } catch (err) {
+          console.warn('Async city lookup error:', err);
         }
-      } catch (err) {
-        console.warn('Async city lookup error:', err);
-      }
-    }
+      })
+    );
   }
 
   useEffect(() => {
@@ -270,6 +309,8 @@ export default function DiscoverPage() {
       .getDiscovery(undefined, PAGE_SIZE, queryText)
       .then((data) => {
         const items = Array.isArray(data) ? data : data.items || [];
+        const initialCities = getCachedCitiesSync(items);
+        setCandidateCities((prev) => ({ ...prev, ...initialCities }));
         setCandidates(items);
         setNextCursor(data.nextCursor || null);
         setHasMore(Boolean(data.hasMore));
@@ -295,6 +336,8 @@ export default function DiscoverPage() {
     try {
       const data = await api.getDiscovery(nextCursor, PAGE_SIZE, debouncedSearchQuery || undefined);
       const items = Array.isArray(data) ? data : data.items || [];
+      const initialCities = getCachedCitiesSync(items);
+      setCandidateCities((prev) => ({ ...prev, ...initialCities }));
       setCandidates((prev) => [...prev, ...items]);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
@@ -471,51 +514,38 @@ export default function DiscoverPage() {
 
   return (
     <main className="w-full px-4 sm:px-8 py-6 min-h-[calc(100vh-4rem)] flex flex-col relative">
-      {/* Top Header & Discovery Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-md shadow-rose-500/20">
-              <IconCompass size={22} className="stroke-[2.2]" />
-            </span>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              Discover
-            </h1>
-          </div>
-          <p className="text-xs text-neutral-400 mt-1">
-            Explore active profiles nearby, connect instantly, and start meaningful conversations.
-          </p>
+      {/* Discovery Toolbar */}
+      <div className="flex items-center justify-between gap-2.5 sm:gap-4 mb-5">
+        {/* Production Search Bar */}
+        <div className="relative flex-1 min-w-0 max-w-xs sm:max-w-sm md:max-w-md">
+          <IconSearch
+            size={15}
+            className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none transition-colors"
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search profiles..."
+            aria-label="Search profiles"
+            className="w-full bg-neutral-900/90 hover:bg-neutral-900 border border-neutral-800 focus:border-rose-500/60 text-white placeholder-neutral-500 text-xs font-medium pl-8 sm:pl-9 pr-6 sm:pr-8 py-2 sm:py-2.5 rounded-2xl outline-none transition-all shadow-inner focus:ring-2 focus:ring-rose-500/20"
+          />
+          {isSearching ? (
+            <div className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin pointer-events-none" />
+          ) : searchQuery ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+              title="Clear search"
+            >
+              <IconX size={12} />
+            </button>
+          ) : null}
         </div>
 
-        {/* Toolbar Controls (Single Line on All Screens) */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 w-full md:w-auto flex-nowrap">
-          {/* Production Search Bar */}
-          <div className="relative flex-1 min-w-0 sm:w-64 md:w-72">
-            <IconSearch
-              size={15}
-              className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none transition-colors"
-            />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              aria-label="Search profiles"
-              className="w-full bg-neutral-900/90 hover:bg-neutral-900 border border-neutral-800 focus:border-rose-500/60 text-white placeholder-neutral-500 text-xs font-medium pl-8 sm:pl-9 pr-6 sm:pr-8 py-2 sm:py-2.5 rounded-2xl outline-none transition-all shadow-inner focus:ring-2 focus:ring-rose-500/20"
-            />
-            {isSearching ? (
-              <div className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin pointer-events-none" />
-            ) : searchQuery ? (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-                title="Clear search"
-              >
-                <IconX size={12} />
-              </button>
-            ) : null}
-          </div>
+        {/* Toolbar Controls Right Side */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-nowrap">
 
           {/* Status Filter Pill Selector */}
           <div className="flex items-center p-0.5 sm:p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">

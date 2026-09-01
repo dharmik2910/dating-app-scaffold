@@ -196,6 +196,10 @@ export default function ProfilePage() {
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if ((profile?.photos?.length || 0) >= 6) {
+      toast.error('You can upload up to 6 photos only. Please delete one first.');
+      return;
+    }
     setUploadingPhoto(true);
 
     const toastId = toast.loading('Uploading your photo...');
@@ -289,7 +293,7 @@ export default function ProfilePage() {
             {/* Display Name */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">
-                Display Name
+                Name
               </label>
               <input
                 type="text"

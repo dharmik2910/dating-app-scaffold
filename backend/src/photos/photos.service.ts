@@ -1,23 +1,37 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from './s3.service';
+
+export const MAX_PHOTOS = 6;
 
 @Injectable()
 export class PhotosService {
   constructor(private prisma: PrismaService, private s3: S3Service) {}
 
-  requestUploadUrl(userId: string, contentType: string) {
+  async requestUploadUrl(userId: string, contentType: string) {
+    const count = await this.prisma.photo.count({ where: { userId } });
+    if (count >= MAX_PHOTOS) {
+      throw new BadRequestException(`Maximum ${MAX_PHOTOS} photos allowed. Please delete a photo before uploading a new one.`);
+    }
     return this.s3.getUploadUrl(userId, contentType);
   }
 
   async uploadDirectFile(userId: string, file: any, order = 0) {
+    const count = await this.prisma.photo.count({ where: { userId } });
+    if (count >= MAX_PHOTOS) {
+      throw new BadRequestException(`Maximum ${MAX_PHOTOS} photos allowed. Please delete a photo before uploading a new one.`);
+    }
     const { publicUrl, key } = await this.s3.uploadBuffer(userId, file.buffer, file.mimetype);
     return this.prisma.photo.create({
       data: { userId, url: publicUrl, order },
     });
   }
 
-  confirmUpload(userId: string, publicUrl: string, key: string, order = 0) {
+  async confirmUpload(userId: string, publicUrl: string, key: string, order = 0) {
+    const count = await this.prisma.photo.count({ where: { userId } });
+    if (count >= MAX_PHOTOS) {
+      throw new BadRequestException(`Maximum ${MAX_PHOTOS} photos allowed. Please delete a photo before uploading a new one.`);
+    }
     return this.prisma.photo.create({
       data: { userId, url: publicUrl, order },
     });
@@ -30,4 +44,5 @@ export class PhotosService {
     return this.prisma.photo.delete({ where: { id: photoId } });
   }
 }
+
 

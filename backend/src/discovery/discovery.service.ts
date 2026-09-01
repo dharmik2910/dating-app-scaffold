@@ -41,6 +41,7 @@ export class DiscoveryService {
           include: {
             photos: {
               orderBy: { order: 'asc' },
+              take: 6,
             },
           },
         },

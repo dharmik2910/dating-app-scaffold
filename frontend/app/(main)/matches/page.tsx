@@ -17,11 +17,44 @@ import {
   IconChevronRight,
   IconCompass,
   IconCircleCheckFilled,
+  IconMapPin,
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import MatchesSkeleton from '@/components/MatchesSkeleton';
 
 type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
+
+const CITY_CACHE_STORAGE_KEY = 'ember_city_lookup_cache';
+
+function getInitialCityCache(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const stored = localStorage.getItem(CITY_CACHE_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+}
+
+let cityLookupCache: Record<string, string> = getInitialCityCache();
+
+function saveCityCache(key: string, label: string) {
+  cityLookupCache[key] = label;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(CITY_CACHE_STORAGE_KEY, JSON.stringify(cityLookupCache));
+    } catch {}
+  }
+}
+
+function parseCityFromBio(bio?: string): string {
+  if (!bio) return '';
+  const cityMatch = bio.match(/\[CITY:(.*?)\]/);
+  if (cityMatch && cityMatch[1]) {
+    return cityMatch[1].trim();
+  }
+  return '';
+}
 
 function preloadImages(urls: (string | undefined)[]) {
   if (typeof window === 'undefined') return;
@@ -34,12 +67,64 @@ function preloadImages(urls: (string | undefined)[]) {
 
 export default function MatchesPage() {
   const [matches, setMatches] = useState<any[]>([]);
+  const [matchCities, setMatchCities] = useState<Record<string, string>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grid5');
   const [cardPhotoIndexes, setCardPhotoIndexes] = useState<Record<string, number>>({});
+
+  function getCachedCitiesSync(items: any[]): Record<string, string> {
+    const resolved: Record<string, string> = {};
+    for (const m of items) {
+      const bioCity = parseCityFromBio(m.otherUser?.bio);
+      if (bioCity) {
+        resolved[m.id] = bioCity;
+      } else if (m.otherUser?.latitude != null && m.otherUser?.longitude != null) {
+        const key = `${m.otherUser.latitude.toFixed(3)},${m.otherUser.longitude.toFixed(3)}`;
+        if (cityLookupCache[key]) {
+          resolved[m.id] = cityLookupCache[key];
+        }
+      }
+    }
+    return resolved;
+  }
+
+  async function resolveCitiesForMatches(items: any[]) {
+    const toLookup = items.filter((m) => {
+      const bioCity = parseCityFromBio(m.otherUser?.bio);
+      if (bioCity) return false;
+      if (m.otherUser?.latitude == null || m.otherUser?.longitude == null) return false;
+      const key = `${m.otherUser.latitude.toFixed(3)},${m.otherUser.longitude.toFixed(3)}`;
+      return !cityLookupCache[key];
+    });
+
+    if (toLookup.length === 0) return;
+
+    await Promise.all(
+      toLookup.map(async (m) => {
+        const key = `${m.otherUser.latitude.toFixed(3)},${m.otherUser.longitude.toFixed(3)}`;
+        try {
+          const res = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${m.otherUser.latitude}&longitude=${m.otherUser.longitude}&localityLanguage=en`
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const city = data.city || data.locality || data.principalSubdivision;
+            const country = data.countryName || data.countryCode;
+            const label = city ? (country ? `${city}, ${country}` : city) : '';
+            if (label) {
+              saveCityCache(key, label);
+              setMatchCities((prev) => ({ ...prev, [m.id]: label }));
+            }
+          }
+        } catch (err) {
+          console.warn('Async match city lookup error:', err);
+        }
+      })
+    );
+  }
 
   useEffect(() => {
     fetchMatches();
@@ -51,6 +136,8 @@ export default function MatchesPage() {
       .getMatches()
       .then((data) => {
         const items = Array.isArray(data) ? data : data.items || [];
+        const initialCities = getCachedCitiesSync(items);
+        setMatchCities((prev) => ({ ...prev, ...initialCities }));
         setMatches(items);
         setNextCursor(data.nextCursor || null);
         setHasMore(Boolean(data.hasMore));
@@ -58,6 +145,7 @@ export default function MatchesPage() {
 
         const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
         preloadImages(photoUrls);
+        resolveCitiesForMatches(items);
       })
       .catch((err) => {
         console.error(err);
@@ -84,12 +172,15 @@ export default function MatchesPage() {
     try {
       const data = await api.getMatches(nextCursor);
       const items = Array.isArray(data) ? data : data.items || [];
+      const initialCities = getCachedCitiesSync(items);
+      setMatchCities((prev) => ({ ...prev, ...initialCities }));
       setMatches((prev) => [...prev, ...items]);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
 
       const photoUrls = items.flatMap((m: any) => (m.otherUser?.photos || []).map((p: any) => p.url)).filter(Boolean);
       preloadImages(photoUrls);
+      resolveCitiesForMatches(items);
     } catch (err) {
       console.error('Failed to load more matches:', err);
     } finally {
@@ -204,6 +295,7 @@ export default function MatchesPage() {
             const photosList = m.otherUser?.photos && m.otherUser.photos.length > 0 ? m.otherUser.photos : [];
             const activePhotoIdx = cardPhotoIndexes[m.id] || 0;
             const currentPhotoUrl = photosList[activePhotoIdx]?.url || photosList[0]?.url;
+            const matchLocation = matchCities[m.id] || parseCityFromBio(m.otherUser?.bio) || 'Nearby';
 
             return (
               <Link
@@ -288,29 +380,28 @@ export default function MatchesPage() {
                     <IconHeartFilled size={26} className="hover:text-rose-400 transition-colors animate-pulse" />
                   </button>
 
-                  {/* Information Overlay */}
+                  {/* Information Overlay (Name & Location Only) */}
                   <div
                     className={
                       viewMode === 'list'
                         ? 'hidden'
-                        : 'absolute bottom-0 inset-x-0 p-4 text-white'
+                        : 'absolute bottom-0 inset-x-0 p-3 sm:p-4 text-white'
                     }
                   >
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="text-base font-bold tracking-tight truncate text-white">
+                    <div className="flex items-center gap-1 sm:gap-1.5">
+                      <h3 className="text-sm sm:text-base font-bold tracking-tight truncate text-white">
                         {m.otherUser?.name || 'Match'}
                       </h3>
-                      <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
+                      <IconCircleCheckFilled size={14} className="text-rose-400 shrink-0" />
                     </div>
-                    {m.otherUser?.bio && (
-                      <p className="text-xs text-neutral-300/90 line-clamp-1 mt-0.5">
-                        {m.otherUser.bio.replace(/\[CITY:.*?\]/, '').replace(/\[INTERESTS:.*?\]/, '').trim()}
-                      </p>
-                    )}
+                    <div className="flex items-center gap-1 text-[11px] sm:text-xs text-neutral-300/90 mt-0.5">
+                      <IconMapPin size={12} className="text-rose-400 shrink-0" />
+                      <span className="truncate font-medium">{matchLocation}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* List View Content Section */}
+                {/* List View Content Section (Name & Location Only) */}
                 {viewMode === 'list' ? (
                   <div className="flex-1 flex items-center justify-between min-w-0 pr-2">
                     <div className="min-w-0 space-y-1">
@@ -320,12 +411,11 @@ export default function MatchesPage() {
                         </h3>
                         <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
                       </div>
-                      {m.otherUser?.bio && (
-                        <p className="text-xs text-neutral-400 line-clamp-1">
-                          {m.otherUser.bio.replace(/\[CITY:.*?\]/, '').replace(/\[INTERESTS:.*?\]/, '').trim()}
-                        </p>
-                      )}
-                      <span className="inline-flex items-center gap-1 text-xs text-rose-400 font-medium">
+                      <div className="flex items-center gap-1 text-xs text-neutral-400">
+                        <IconMapPin size={12} className="text-rose-400 shrink-0" />
+                        <span className="truncate font-medium">{matchLocation}</span>
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-xs text-rose-400 font-medium pt-0.5">
                         <IconMessageCircle size={13} />
                         <span>Chat Now</span>
                       </span>

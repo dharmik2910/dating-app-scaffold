@@ -12,8 +12,8 @@ export class PhotosController {
 
   // Step 1: get a signed URL to upload directly to S3 from the client.
   @Post('upload-url')
-  getUploadUrl(@CurrentUser() userId: string, @Body('contentType') contentType: string) {
-    return this.photosService.requestUploadUrl(userId, contentType);
+  async getUploadUrl(@CurrentUser() userId: string, @Body('contentType') contentType: string) {
+    return await this.photosService.requestUploadUrl(userId, contentType);
   }
 
   // Direct backend upload fallback route (handles multipart form upload directly)
@@ -30,6 +30,9 @@ export class PhotosController {
     try {
       return await this.photosService.uploadDirectFile(userId, file, order ? parseInt(order, 10) : 0);
     } catch (error: any) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       console.error('S3 Upload Error:', error);
       throw new InternalServerErrorException(error.message || 'S3 Upload Failed');
     }
@@ -39,8 +42,8 @@ export class PhotosController {
 
   // Step 2: after the client PUTs the file to S3, confirm it so we save a Photo row.
   @Post('confirm')
-  confirm(@CurrentUser() userId: string, @Body() body: { publicUrl: string; key: string; order?: number }) {
-    return this.photosService.confirmUpload(userId, body.publicUrl, body.key, body.order);
+  async confirm(@CurrentUser() userId: string, @Body() body: { publicUrl: string; key: string; order?: number }) {
+    return await this.photosService.confirmUpload(userId, body.publicUrl, body.key, body.order);
   }
 
   @Delete(':id')
