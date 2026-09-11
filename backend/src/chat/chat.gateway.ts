@@ -30,16 +30,25 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.lastActiveMap.get(userId) || null;
   }
 
-  // Auth on connect: client passes JWT as `auth: { token }` in the socket.io handshake.
+  // Auth on connect: client passes JWT as auth: { token }, header, or query
   handleConnection(client: Socket) {
     try {
-      const token = client.handshake.auth?.token;
+      let token = client.handshake.auth?.token;
+      if (!token && client.handshake.headers?.authorization) {
+        token = client.handshake.headers.authorization.replace(/^Bearer\s+/i, '');
+      }
+      if (!token && client.handshake.query?.token) {
+        token = Array.isArray(client.handshake.query.token)
+          ? client.handshake.query.token[0]
+          : client.handshake.query.token;
+      }
+
       if (!token) {
-        client.disconnect();
         return;
       }
       const payload = this.jwt.verify(token, { secret: process.env.JWT_SECRET });
       const userId = payload.sub;
+      if (!userId) return;
       (client.data as any).userId = userId;
 
       client.join(`user:${userId}`);
@@ -61,8 +70,42 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
     } catch {
-      client.disconnect();
+      // Allow unauthenticated connection for now; client can authenticate via 'authenticate' event
     }
+  }
+
+  @SubscribeMessage('authenticate')
+  onAuthenticate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data?: { token?: string },
+  ) {
+    try {
+      const token = data?.token || client.handshake.auth?.token;
+      if (!token) return { success: false };
+      const payload = this.jwt.verify(token, { secret: process.env.JWT_SECRET });
+      const userId = payload.sub;
+      if (userId) {
+        (client.data as any).userId = userId;
+        client.join(`user:${userId}`);
+        const sockets = this.userSockets.get(userId) || new Set<string>();
+        const wasOnline = sockets.size > 0;
+        sockets.add(client.id);
+        this.userSockets.set(userId, sockets);
+        const now = new Date();
+        this.lastActiveMap.set(userId, now);
+        if (!wasOnline) {
+          this.server.emit('userStatusChanged', {
+            userId,
+            isOnline: true,
+            lastActiveAt: now.toISOString(),
+          });
+        }
+        return { success: true, userId };
+      }
+    } catch {
+      return { success: false };
+    }
+    return { success: false };
   }
 
   handleDisconnect(client: Socket) {

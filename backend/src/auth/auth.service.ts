@@ -1,15 +1,177 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseService } from './firebase.service';
+import { AwsSmsService } from './aws-sms.service';
+
+interface StoredOtp {
+  code: string;
+  expiresAt: number;
+  attempts: number;
+  lastSentAt: number;
+}
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  // In-memory OTP cache: phone -> StoredOtp
+  private otpStore = new Map<string, StoredOtp>();
+
   constructor(
     private prisma: PrismaService,
     private firebase: FirebaseService,
+    private awsSms: AwsSmsService,
     private jwt: JwtService,
-  ) { }
+  ) {}
+
+  /**
+   * Send SMS OTP using AWS SNS / AWS End User Messaging SMS
+   */
+  async sendOtp(phone: string) {
+    if (!phone || phone.trim().length < 5) {
+      throw new BadRequestException('Valid mobile number is required');
+    }
+
+    const formattedPhone = this.awsSms.normalizePhoneNumber(phone.trim());
+
+    // Rate limiting: 30 seconds between resends
+    const existing = this.otpStore.get(formattedPhone);
+    const now = Date.now();
+    if (existing && now - existing.lastSentAt < 30000) {
+      const waitSec = Math.ceil((30000 - (now - existing.lastSentAt)) / 1000);
+      throw new BadRequestException(`Please wait ${waitSec}s before requesting a new OTP.`);
+    }
+
+    // Generate 6-digit random OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store in cache with 5-minute TTL
+    this.otpStore.set(formattedPhone, {
+      code: otp,
+      expiresAt: now + 5 * 60 * 1000,
+      attempts: 0,
+      lastSentAt: now,
+    });
+
+    // Send SMS via AWS SNS
+    const smsResult = await this.awsSms.sendOtpSms(formattedPhone, otp);
+
+    const isDev = process.env.NODE_ENV !== 'production';
+    this.logger.log(`OTP generated for ${formattedPhone}: ${isDev ? otp : '******'}`);
+
+    if (!smsResult.success) {
+      this.logger.warn(`SMS OTP dispatch warning: ${smsResult.error}`);
+      if (!isDev) {
+        throw new BadRequestException(
+          `Failed to send SMS to ${formattedPhone}: ${smsResult.error || 'SMS delivery error'}. Please check AWS credentials and permissions.`
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: smsResult.success
+        ? 'Verification code sent to your mobile number via SMS.'
+        : 'Running in dev mode. Use the OTP code displayed on screen or 123456.',
+      phone: formattedPhone,
+      messageId: smsResult.messageId,
+      devOtp: isDev ? otp : undefined,
+    };
+  }
+
+  /**
+   * Verify SMS OTP and Login/Register User
+   */
+  async verifyOtp(phone: string, code: string) {
+    if (!phone || !code) {
+      throw new BadRequestException('Mobile number and verification code are required');
+    }
+
+    const formattedPhone = this.awsSms.normalizePhoneNumber(phone.trim());
+    const cleanCode = code.trim();
+    const isDev = process.env.NODE_ENV !== 'production';
+
+    // Allow dev bypass code (123456 / 000000) in development mode
+    const isDevBypass = isDev && (cleanCode === '123456' || cleanCode === '000000');
+
+    if (!isDevBypass) {
+      const stored = this.otpStore.get(formattedPhone);
+      if (!stored) {
+        throw new UnauthorizedException('No OTP request found for this mobile number or code has expired. Please request a new code.');
+      }
+
+      if (Date.now() > stored.expiresAt) {
+        this.otpStore.delete(formattedPhone);
+        throw new UnauthorizedException('OTP has expired. Please request a new code.');
+      }
+
+      if (stored.attempts >= 5) {
+        this.otpStore.delete(formattedPhone);
+        throw new UnauthorizedException('Too many incorrect attempts. Please request a new code.');
+      }
+
+      if (stored.code !== cleanCode) {
+        stored.attempts += 1;
+        this.otpStore.set(formattedPhone, stored);
+        throw new UnauthorizedException('Invalid verification code. Please check and try again.');
+      }
+
+      // Valid OTP: delete from store
+      this.otpStore.delete(formattedPhone);
+    }
+
+    const firebaseUid = `otp-${formattedPhone}`;
+
+    // Find or create user
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: formattedPhone },
+          { firebaseUid },
+        ],
+      },
+      include: {
+        profile: true,
+        photos: { orderBy: { order: 'asc' } },
+      },
+    });
+
+    let isNewUser = false;
+    if (!user) {
+      isNewUser = true;
+      user = await this.prisma.user.create({
+        data: {
+          phone: formattedPhone,
+          firebaseUid,
+          phoneVerified: true,
+        },
+        include: {
+          profile: true,
+          photos: { orderBy: { order: 'asc' } },
+        },
+      });
+      this.logger.log(`Created new user for phone ${formattedPhone} with ID: ${user.id}`);
+    }
+
+    const tokens = this.issueTokens(user.id);
+
+    return {
+      ...tokens,
+      user,
+      isNewUser,
+    };
+  }
+
+  /**
+   * Backwards-compatible aliases for existing client code
+   */
+  async sendWhatsappOtp(phone: string) {
+    return this.sendOtp(phone);
+  }
+
+  async verifyWhatsappOtp(phone: string, code: string) {
+    return this.verifyOtp(phone, code);
+  }
 
   async loginWithFirebaseToken(idToken: string) {
     let decoded;
@@ -23,11 +185,11 @@ export class AuthService {
         const user = await this.prisma.user.upsert({
           where: { firebaseUid: 'demo-user-uid' },
           update: {},
-          create: { firebaseUid: 'demo-user-uid', phone: '+15550192834' },
+          create: { firebaseUid: 'demo-user-uid', phone: '+919876543210' },
         });
         return this.issueTokens(user.id);
       }
-      throw new UnauthorizedException('Invalid or expired Firebase token');
+      throw new UnauthorizedException('Invalid or expired token');
     }
 
     const { uid, phone_number: phone } = decoded;
@@ -42,47 +204,7 @@ export class AuthService {
     return this.issueTokens(user.id);
   }
 
-  async sendWhatsappOtp(phone: string) {
-    return {
-      message: 'OTP sent successfully',
-      devOtpCode: '123456',
-    };
-  }
-
-  async verifyWhatsappOtp(phone: string, code: string) {
-    if (!phone) {
-      throw new UnauthorizedException('Phone number is required');
-    }
-    if (code !== '123456' && code !== '000000' && process.env.NODE_ENV === 'production') {
-      throw new UnauthorizedException('Invalid verification code');
-    }
-
-    const formattedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-    const firebaseUid = `otp-${formattedPhone}`;
-
-    let user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { phone: formattedPhone },
-          { firebaseUid },
-        ],
-      },
-    });
-
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          phone: formattedPhone,
-          firebaseUid,
-        },
-      });
-    }
-
-    return this.issueTokens(user.id);
-  }
-
   async refresh(refreshToken: string) {
-
     try {
       const payload = this.jwt.verify(refreshToken, { secret: process.env.JWT_SECRET });
       return this.issueTokens(payload.sub);
@@ -97,4 +219,3 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 }
-

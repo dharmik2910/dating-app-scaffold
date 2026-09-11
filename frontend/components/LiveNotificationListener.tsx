@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { IconMessageCircle, IconUser, IconX, IconArrowRight } from '@tabler/icons-react';
+import { IconUser, IconX, IconArrowRight } from '@tabler/icons-react';
 import { getSocket } from '@/lib/socket';
 import { playNotificationSound } from '@/lib/sound';
 import { useChatStore, ChatNotificationPayload } from '@/lib/useChatStore';
@@ -14,9 +14,40 @@ export default function LiveNotificationListener() {
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, user } = useAuth();
+  const unreadMatchIds = useChatStore((state) => state.unreadMatchIds);
   const addUnreadMatch = useChatStore((state) => state.addUnreadMatch);
   const clearUnreadMatch = useChatStore((state) => state.clearUnreadMatch);
   const setUserStatus = usePresenceStore((state) => state.setUserStatus);
+  const originalTitleRef = useRef<string>('');
+
+  // Store original document title
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (!originalTitleRef.current || !originalTitleRef.current.startsWith('(')) {
+        originalTitleRef.current = document.title || 'Spark';
+      }
+    }
+  }, []);
+
+  // Update document title with unread indicator
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const baseTitle = originalTitleRef.current.replace(/^\(\d+\)\s*/, '') || 'Spark';
+    if (unreadMatchIds.length > 0) {
+      document.title = `(${unreadMatchIds.length}) ${baseTitle}`;
+    } else {
+      document.title = baseTitle;
+    }
+  }, [unreadMatchIds]);
+
+  // Request browser notification permissions on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+  }, []);
 
   // Clear unread badge if user is on the specific chat page
   useEffect(() => {
@@ -32,6 +63,12 @@ export default function LiveNotificationListener() {
     if (!isAuthenticated) return;
 
     const socket = getSocket();
+
+    // Authenticate socket on initialization
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    if (token) {
+      socket.emit('authenticate', { token });
+    }
 
     // 1. Listen for real-time presence/activity status changes
     const handleStatusChanged = (data: { userId: string; isOnline: boolean; lastActiveAt?: string }) => {
@@ -63,6 +100,23 @@ export default function LiveNotificationListener() {
       if (!isCurrentlyInThisChat) {
         addUnreadMatch(data.matchId, data);
         playNotificationSound();
+
+        // If tab is in background or window unfocused, send Native Browser Notification
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+          if (document.hidden) {
+            try {
+              const nativeNotif = new Notification(data.senderName || 'New message on Spark', {
+                body: data.content,
+                icon: data.senderPhoto || '/favicon.ico',
+              });
+              nativeNotif.onclick = () => {
+                window.focus();
+                router.push(`/chat/${data.matchId}`);
+                nativeNotif.close();
+              };
+            } catch {}
+          }
+        }
 
         // Display interactive live toast notification
         toast.custom(

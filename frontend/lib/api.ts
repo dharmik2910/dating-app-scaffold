@@ -16,7 +16,17 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
       ...options.headers,
     },
   });
-  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    let errorMsg = `API error ${res.status}`;
+    try {
+      const errorJson = await res.json();
+      errorMsg = errorJson.message || errorJson.error || errorMsg;
+    } catch {
+      const text = await res.text().catch(() => '');
+      if (text) errorMsg = text;
+    }
+    throw new Error(errorMsg);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -71,10 +81,14 @@ async function compressImage(file: File, maxWidth = 1200, quality = 0.82): Promi
 }
 
 export const api = {
+  sendOtp: (phone: string) =>
+    request('/auth/send-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
+  verifyOtp: (phone: string, code: string) =>
+    request('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, code }) }),
   sendWhatsappOtp: (phone: string) =>
-    request('/auth/send-whatsapp-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
+    request('/auth/send-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyWhatsappOtp: (phone: string, code: string) =>
-    request('/auth/verify-whatsapp-otp', { method: 'POST', body: JSON.stringify({ phone, code }) }),
+    request('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, code }) }),
   verifyFirebaseToken: (idToken: string) =>
     request('/auth/verify', { method: 'POST', body: JSON.stringify({ idToken }) }),
   getMe: () => request('/users/me'),

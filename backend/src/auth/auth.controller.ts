@@ -4,22 +4,38 @@ import { VerifyFirebaseTokenDto } from './dto/verify-token.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
+  /**
+   * Send OTP SMS via AWS SNS
+   */
+  @Post('send-otp')
+  async sendOtp(@Body('phone') phone: string) {
+    return this.authService.sendOtp(phone);
+  }
+
+  /**
+   * Verify OTP SMS and Login/Register
+   */
+  @Post('verify-otp')
+  async verifyOtp(@Body('phone') phone: string, @Body('code') code: string) {
+    return this.authService.verifyOtp(phone, code);
+  }
+
+  /**
+   * Backwards-compatible aliases
+   */
   @Post('send-whatsapp-otp')
   async sendWhatsappOtp(@Body('phone') phone: string) {
-    return this.authService.sendWhatsappOtp(phone);
+    return this.authService.sendOtp(phone);
   }
 
   @Post('verify-whatsapp-otp')
   async verifyWhatsappOtp(@Body('phone') phone: string, @Body('code') code: string) {
-    return this.authService.verifyWhatsappOtp(phone, code);
+    return this.authService.verifyOtp(phone, code);
   }
 
-  // Client signs in with Firebase Phone Auth (sends its own OTP SMS),
-  // then sends us the resulting Firebase ID token to exchange for our app JWTs.
   @Post('verify')
-
   async verify(@Body() dto: VerifyFirebaseTokenDto) {
     return this.authService.loginWithFirebaseToken(dto.idToken);
   }

@@ -28,7 +28,7 @@ npx prisma migrate dev --name init
 npm run start:dev      
 ```
 
-## Frontend setup
+## Frontend setup (Web)
 
 ```bash
 cd frontend
@@ -37,18 +37,19 @@ cp .env.local.example .env.local   # fill in API URL + Firebase client config
 npm run dev              
 ```
 
-## Mobile App setup
+## Mobile App setup (React Native / Expo)
 
 ```bash
 cd mobile
 npm install
+# Configure EXPO_PUBLIC_API_URL in mobile/.env (defaults to dynamic host / localhost:3001)
 npx expo start
 ```
 
-Firebase **client** config (different from the Admin SDK creds above) comes
-from Firebase Console → Project Settings → General → Your apps → Web app.
-You'll also need to enable **Phone** as a sign-in provider under
-Authentication → Sign-in method.
+### Instant Testing & Dev OTPs (Web & Mobile)
+- **Automatic Test Code Display**: When requesting an OTP on both Web and Mobile, the generated OTP code is displayed directly on the screen in a banner with a 1-click **Auto-fill** button.
+- **Universal Dev Bypass Code**: You can also enter `123456` or `000000` on any phone number in development mode.
+- **Terminal Logs**: The backend prints every generated OTP to the console: `[AuthService] OTP generated for +91XXXXXXXXXX: 123456`.
 
 ## What's scaffolded
 
