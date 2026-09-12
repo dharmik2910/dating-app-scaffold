@@ -225,7 +225,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#09090b" translucent={true} />
 
       {/* Top Studio Header Section */}
       <View style={styles.header}>

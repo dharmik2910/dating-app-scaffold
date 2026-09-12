@@ -545,8 +545,8 @@ export default function SetupPage() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="light-content" backgroundColor="#09090b" translucent={true} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -562,7 +562,7 @@ export default function SetupPage() {
             <View style={styles.brandRow}>
               <View style={styles.brandLogoBox}>
                 <Ionicons name="flame" size={20} color="#f43f5e" />
-                <Text style={styles.brandLogoText}>Ember</Text>
+                <Text style={styles.brandLogoText}>Lovora</Text>
               </View>
               <View style={styles.stepBadgeBox}>
                 <Text style={styles.stepBadgeText}>
