@@ -430,7 +430,7 @@ export default function DiscoverScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="light-content" backgroundColor="#09090b" translucent={true} />
+      <StatusBar barStyle="light-content" />
 
       {/* Top Search & Filter Bar */}
       <Animated.View

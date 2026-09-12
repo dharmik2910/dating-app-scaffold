@@ -25,15 +25,6 @@
       "usesCleartextTraffic": true,
       "predictiveBackGestureEnabled": false
     },
-    "androidStatusBar": {
-      "barStyle": "light-content",
-      "backgroundColor": "#09090b",
-      "translucent": true
-    },
-    "androidNavigationBar": {
-      "barStyle": "light-content",
-      "backgroundColor": "#09090b"
-    },
     "web": {
       "output": "static",
       "favicon": "./assets/images/lovora.png"

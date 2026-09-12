@@ -110,11 +110,11 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="light-content" backgroundColor="#09090b" translucent={true} />
+      <StatusBar barStyle="light-content" />
 
-      {/* Top Bar with Back Button only in OTP Step */}
-      {loginStep === 'otp' && (
-        <View style={styles.topHeader}>
+      {/* Top Bar with Back Button when in OTP Step */}
+      <View style={styles.topHeader}>
+        {loginStep === 'otp' && (
           <TouchableOpacity
             style={styles.iconBackBtn}
             onPress={() => {
@@ -124,12 +124,12 @@ export default function AuthScreen() {
           >
             <Ionicons name="arrow-back" size={24} color="#ffffff" />
           </TouchableOpacity>
-        </View>
-      )}
+        )}
+      </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {/* Brand Header */}
-        <View style={[styles.brandHero, loginStep === 'otp' && { marginTop: 4 }]}>
+        <View style={styles.brandHero}>
           <View style={styles.flameIconCircle}>
             <Ionicons name="flame" size={40} color="#f43f5e" />
           </View>
@@ -258,24 +258,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#09090b',
   },
   topHeader: {
-    height: 40,
+    height: 48,
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    width: '100%',
+    paddingHorizontal: 20,
   },
   iconBackBtn: {
     padding: 6,
     width: 40,
   },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingBottom: 40,
     alignItems: 'center',
   },
   brandHero: {
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 20,
+    marginTop: 20,
+    marginBottom: 28,
   },
   flameIconCircle: {
     width: 72,
