@@ -1,8 +1,9 @@
 import React from 'react';
-import { Animated, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Animated, Text, TouchableOpacity, StyleSheet, Platform, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
+import { useNotification } from '@/context/NotificationContext';
 
 const TAB_CONFIG: Record<
   string,
@@ -23,6 +24,7 @@ type CustomTabBarProps = {
 export default function CustomTabBar({ state, descriptors, navigation }: CustomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { translateY } = useTabBarVisibility();
+  const { unreadCount } = useNotification();
   const isWeb = Platform.OS === 'web';
   const bottomPadding = isWeb ? 8 : Math.max(insets.bottom, 6);
   const tabHeight = isWeb ? 68 : 60 + bottomPadding;
@@ -53,6 +55,7 @@ export default function CustomTabBar({ state, descriptors, navigation }: CustomT
         const isFocused = state.index === index;
         const iconName = isFocused ? config.icon : config.iconOutline;
         const color = isFocused ? '#f43f5e' : '#a1a1aa';
+        const hasUnread = route.name === 'chats' && unreadCount > 0;
 
         const onPress = () => {
           const event = navigation.emit({
@@ -75,7 +78,12 @@ export default function CustomTabBar({ state, descriptors, navigation }: CustomT
             activeOpacity={0.7}
             style={styles.tabButton}
           >
-            <Ionicons name={iconName} size={22} color={color} />
+            <View style={{ position: 'relative' }}>
+              <Ionicons name={iconName} size={22} color={color} />
+              {hasUnread && (
+                <View style={styles.unreadBadgeDot} />
+              )}
+            </View>
             <Text style={[styles.tabLabel, { color }, isFocused && styles.tabLabelFocused]}>
               {config.title}
             </Text>
@@ -120,5 +128,16 @@ const styles = StyleSheet.create({
   },
   tabLabelFocused: {
     fontWeight: '700',
+  },
+  unreadBadgeDot: {
+    position: 'absolute',
+    top: -1,
+    right: -3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#f43f5e',
+    borderWidth: 1.5,
+    borderColor: '#09090b',
   },
 });

@@ -1,6 +1,9 @@
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Candidate, Match } from '@/constants/mockData';
+
+const AUTH_STORAGE_KEY = 'ember_mobile_auth_token';
 
 function getApiUrl(): string {
   // 1. In browser environments, dynamically use the current host so it always routes to the active backend
@@ -41,8 +44,18 @@ export const API_URL = getApiUrl();
 
 let userAuthToken: string | null = null;
 
-export function setAuthToken(token: string | null) {
+export async function setAuthToken(token: string | null): Promise<void> {
   userAuthToken = token;
+  try {
+    if (token) {
+      await AsyncStorage.setItem(AUTH_STORAGE_KEY, token);
+    } else {
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.warn('AsyncStorage setAuthToken error:', e);
+  }
+
   if (typeof window !== 'undefined' && window.localStorage) {
     if (token) {
       window.localStorage.setItem('accessToken', token);
@@ -53,14 +66,31 @@ export function setAuthToken(token: string | null) {
 }
 
 export function getAuthToken(): string | null {
-  if (!userAuthToken && typeof window !== 'undefined' && window.localStorage) {
+  return userAuthToken;
+}
+
+export async function loadStoredAuthToken(): Promise<string | null> {
+  try {
+    const stored = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+    if (stored) {
+      userAuthToken = stored;
+      return stored;
+    }
+  } catch (e) {
+    console.warn('AsyncStorage loadStoredAuthToken error:', e);
+  }
+
+  if (typeof window !== 'undefined' && window.localStorage) {
     userAuthToken = window.localStorage.getItem('accessToken');
   }
   return userAuthToken;
 }
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
+  let token = getAuthToken();
+  if (!token) {
+    token = await loadStoredAuthToken();
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
@@ -70,31 +100,66 @@ async function request<T = any>(path: string, options: RequestInit = {}): Promis
     },
   });
 
-  if (res.status === 401) {
-    setAuthToken(null);
-    throw new Error(`API error 401: Unauthorized`);
-  }
-
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`API error ${res.status}: ${errorText}`);
+    let errorMsg = `API error ${res.status}`;
+    try {
+      const errorJson = await res.json();
+      errorMsg = errorJson.message || errorJson.error || errorMsg;
+      if (Array.isArray(errorMsg)) {
+        errorMsg = errorMsg.join(', ');
+      }
+    } catch {
+      const text = await res.text().catch(() => '');
+      if (text) errorMsg = text;
+    }
+
+    if (res.status === 401) {
+      // Only clear cached token if this was an authenticated route request with an expired token,
+      // not during initial auth endpoints
+      if (token && !path.startsWith('/auth/')) {
+        await setAuthToken(null);
+      }
+    }
+
+    throw new Error(errorMsg);
   }
 
   return res.json() as Promise<T>;
 }
 
 export const mobileApi = {
-  // Auth endpoints
+  // Auth endpoints (AWS SNS SMS OTP)
+  sendOtp: async (phone: string) => {
+    return await request('/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone }),
+    });
+  },
+
+  verifyOtp: async (phone: string, code: string) => {
+    const res = await request<{ accessToken: string; refreshToken?: string; isNewUser?: boolean; user?: any }>(
+      '/auth/verify-otp',
+      {
+        method: 'POST',
+        body: JSON.stringify({ phone, code }),
+      }
+    );
+    if (res?.accessToken) {
+      setAuthToken(res.accessToken);
+    }
+    return res;
+  },
+
   sendWhatsappOtp: async (phone: string) => {
-    return await request('/auth/send-whatsapp-otp', {
+    return await request('/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ phone }),
     });
   },
 
   verifyWhatsappOtp: async (phone: string, code: string) => {
-    const res = await request<{ accessToken: string; refreshToken?: string }>(
-      '/auth/verify-whatsapp-otp',
+    const res = await request<{ accessToken: string; refreshToken?: string; isNewUser?: boolean; user?: any }>(
+      '/auth/verify-otp',
       {
         method: 'POST',
         body: JSON.stringify({ phone, code }),
@@ -191,35 +256,24 @@ export const mobileApi = {
       });
     }
 
-    // 2. Web browser blob/file handling vs Native file
-    let fileToSend: any;
-    if (Platform.OS === 'web' || typeof window !== 'undefined') {
-      if (
-        uriOrUrl.startsWith('blob:') ||
-        uriOrUrl.startsWith('data:')
-      ) {
-        try {
-          const resp = await fetch(uriOrUrl);
-          const blob = await resp.blob();
-          fileToSend = new File([blob], `photo_${Date.now()}_${order}.jpg`, {
-            type: blob.type || 'image/jpeg',
-          });
-        } catch {}
-      }
-    }
-
+    // 2. Prepare FormData for Native (Android / iOS) vs Web
     const formData = new FormData();
-    if (fileToSend) {
-      formData.append('file', fileToSend);
-    } else {
-      const filename = uriOrUrl.split('/').pop() || `photo_${Date.now()}.jpg`;
-      const match = /\.(\w+)$/.exec(filename);
-      const type = match ? `image/${match[1].toLowerCase()}` : 'image/jpeg';
+    const cleanFilename = `photo_${Date.now()}_${order}.jpg`;
 
+    if (Platform.OS === 'web') {
+      try {
+        const resp = await fetch(uriOrUrl);
+        const blob = await resp.blob();
+        formData.append('file', blob, cleanFilename);
+      } catch {
+        formData.append('file', uriOrUrl);
+      }
+    } else {
+      // Native React Native (Android / iOS) FormDataPart structure
       formData.append('file', {
         uri: uriOrUrl,
-        name: filename,
-        type,
+        name: cleanFilename,
+        type: 'image/jpeg',
       } as any);
     }
     formData.append('order', order.toString());
@@ -227,7 +281,7 @@ export const mobileApi = {
     const res = await fetch(`${API_URL}/photos/upload-file`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: formData,
     });
@@ -363,37 +417,35 @@ export const mobileApi = {
   },
 
   uploadStoryMedia: async (imageUri: string) => {
-    let fileToSend: any;
+    const token = getAuthToken();
+    if (!token) throw new Error('Not authenticated');
 
-    if (Platform.OS === 'web' || typeof window !== 'undefined') {
-      if (
-        imageUri.startsWith('http://') ||
-        imageUri.startsWith('https://') ||
-        imageUri.startsWith('data:') ||
-        imageUri.startsWith('blob:')
-      ) {
-        try {
-          const resp = await fetch(imageUri);
-          const blob = await resp.blob();
-          fileToSend = new File([blob], `story_${Date.now()}.jpg`, {
-            type: blob.type || 'image/jpeg',
-          });
-        } catch {}
-      }
+    // 1. Remote sample story (e.g. Unsplash URL)
+    if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
+      return { mediaUrl: imageUri, key: `story_${Date.now()}` };
     }
 
+    // 2. Prepare FormData for Native (Android / iOS) vs Web
     const formData = new FormData();
-    if (fileToSend) {
-      formData.append('file', fileToSend);
+    const cleanFilename = `story_${Date.now()}.jpg`;
+
+    if (Platform.OS === 'web') {
+      try {
+        const resp = await fetch(imageUri);
+        const blob = await resp.blob();
+        formData.append('file', blob, cleanFilename);
+      } catch {
+        formData.append('file', imageUri);
+      }
     } else {
+      // Native React Native (Android / iOS) FormDataPart structure
       formData.append('file', {
         uri: imageUri,
+        name: cleanFilename,
         type: 'image/jpeg',
-        name: `story_${Date.now()}.jpg`,
       } as any);
     }
 
-    const token = getAuthToken();
     const res = await fetch(`${API_URL}/stories/upload-file`, {
       method: 'POST',
       headers: {

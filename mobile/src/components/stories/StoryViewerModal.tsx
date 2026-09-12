@@ -6,7 +6,6 @@ import {
   Image,
   TouchableOpacity,
   Modal,
-  SafeAreaView,
   Dimensions,
   StatusBar,
   TouchableWithoutFeedback,
@@ -15,6 +14,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { mobileApi } from '@/services/api';
 import { getSocket } from '@/services/socket';
@@ -189,7 +189,7 @@ export default function StoryViewerModal({
   return (
     <Modal visible={true} transparent={false} animationType="fade">
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
         {/* Fullscreen Story Image */}
         <Image
           source={{ uri: currentStory.mediaUrl }}

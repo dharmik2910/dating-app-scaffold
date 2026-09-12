@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { mobileApi, setAuthToken, getAuthToken } from '@/services/api';
+import { mobileApi, setAuthToken, getAuthToken, loadStoredAuthToken } from '@/services/api';
 
 export interface UserProfile {
   id?: string;
@@ -48,8 +48,8 @@ interface AuthContextType {
   user: UserProfile | null;
   phoneNumber: string;
   setPhoneNumber: (phone: string) => void;
-  loginWithPhone: (phone: string) => Promise<boolean>;
-  verifyOtp: (code: string) => Promise<boolean>;
+  loginWithPhone: (phone: string) => Promise<any>;
+  verifyOtp: (code: string, phoneOverride?: string) => Promise<boolean>;
   completeOnboarding: (data: Partial<UserProfile>) => Promise<void>;
   refreshUser: () => Promise<UserProfile | null>;
   logout: () => void;
@@ -67,7 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = async (): Promise<UserProfile | null> => {
     try {
-      const token = getAuthToken();
+      let token = getAuthToken();
+      if (!token) {
+        token = await loadStoredAuthToken();
+      }
       if (!token) {
         setUser(null);
         setIsAuthenticated(false);
@@ -86,51 +89,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // Attempt fetching current logged-in user on app launch
+    // Attempt restoring saved session from AsyncStorage on app launch
     (async () => {
       try {
-        await refreshUser();
+        const savedToken = await loadStoredAuthToken();
+        if (savedToken) {
+          const remoteUser = await mobileApi.getMe();
+          if (remoteUser) {
+            setUser(remoteUser);
+            setIsAuthenticated(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Initial session restore error:', err);
       } finally {
         setIsReady(true);
       }
     })();
   }, []);
 
-  async function loginWithPhone(phone: string): Promise<boolean> {
-    setPhoneNumber(phone);
+  async function loginWithPhone(phone: string): Promise<any> {
+    const cleanPhone = phone.trim();
+    setPhoneNumber(cleanPhone);
     try {
-      await mobileApi.sendWhatsappOtp(phone);
-    } catch (e) {
-      console.warn('sendWhatsappOtp error:', e);
+      const res = await mobileApi.sendOtp(cleanPhone);
+      return res;
+    } catch (e: any) {
+      console.warn('sendOtp error:', e);
+      throw e;
     }
-    return true;
   }
 
-  async function verifyOtp(code: string): Promise<boolean> {
-    try {
-      if (phoneNumber) {
-        const res = await mobileApi.verifyWhatsappOtp(phoneNumber, code);
-        if (res?.accessToken) {
-          setAuthToken(res.accessToken);
-        }
-      } else {
-        const res = await mobileApi.verifyFirebaseToken(code);
-        if (res?.accessToken) {
-          setAuthToken(res.accessToken);
-        }
-      }
-    } catch (e) {
-      console.warn('verifyWhatsappOtp error, trying verifyFirebaseToken:', e);
-      const res = await mobileApi.verifyFirebaseToken(code);
-      if (res?.accessToken) {
-        setAuthToken(res.accessToken);
-      }
+  async function verifyOtp(code: string, phoneOverride?: string): Promise<boolean> {
+    const targetPhone = (phoneOverride || phoneNumber || '').trim();
+    if (targetPhone && targetPhone !== phoneNumber) {
+      setPhoneNumber(targetPhone);
+    }
+    const res = await mobileApi.verifyOtp(targetPhone, code);
+    if (res?.accessToken) {
+      await setAuthToken(res.accessToken);
     }
 
     setIsAuthenticated(true);
     const remoteUser = await mobileApi.getMe();
     if (remoteUser) {
       setUser(remoteUser);
+    } else if (res?.user) {
+      setUser(res.user);
     }
     return true;
   }
@@ -167,8 +172,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  function logout() {
-    setAuthToken(null);
+  async function logout() {
+    await setAuthToken(null);
     setIsAuthenticated(false);
     setUser(null);
     setPhoneNumber('');

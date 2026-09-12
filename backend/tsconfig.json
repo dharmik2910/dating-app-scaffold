@@ -4,11 +4,13 @@
     "declaration": true,
     "target": "ES2021",
     "outDir": "./dist",
+    "rootDir": "src",
     "baseUrl": "./",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "sourceMap": true,
     "strict": true,
     "skipLibCheck": true
-  }
+  },
+  "include": ["src/**/*"]
 }

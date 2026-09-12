@@ -16,18 +16,36 @@ export interface ChatNotification {
 
 interface NotificationContextType {
   activeNotification: ChatNotification | null;
+  unreadCount: number;
+  unreadMatchIds: string[];
   dismissNotification: () => void;
   showNotification: (notification: ChatNotification) => void;
+  clearUnreadMatch: (matchId: string) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | null>(null);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [activeNotification, setActiveNotification] = useState<ChatNotification | null>(null);
+  const [unreadMatchIds, setUnreadMatchIds] = useState<string[]>([]);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
   const segments = useSegments();
   const { user, isAuthenticated } = useAuth();
+
+  const clearUnreadMatch = useCallback((matchId: string) => {
+    setUnreadMatchIds((prev) => prev.filter((id) => id !== matchId));
+  }, []);
+
+  // Auto-clear unread match when user navigates into that chat
+  useEffect(() => {
+    if (segments[0] === 'chat') {
+      const activeMatchId = (segments as any)[1] || (segments as any).id;
+      if (activeMatchId) {
+        clearUnreadMatch(activeMatchId);
+      }
+    }
+  }, [segments, clearUnreadMatch]);
 
   const dismissNotification = useCallback(() => {
     if (dismissTimerRef.current) {
@@ -44,8 +62,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         clearTimeout(dismissTimerRef.current);
       }
 
-      // 2. Set active notification
+      // 2. Set active notification and track unread
       setActiveNotification(notif);
+      if (notif.matchId) {
+        setUnreadMatchIds((prev) => (prev.includes(notif.matchId) ? prev : [...prev, notif.matchId]));
+      }
 
       // 3. Trigger WhatsApp-style vibration pattern (wait 0ms, vibrate 80ms, pause 50ms, vibrate 80ms)
       if (Platform.OS !== 'web') {
@@ -98,7 +119,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const socket = getSocket();
 
     const handleChatNotification = (data: ChatNotification) => {
-      const currentUserId = user?.id;
+      const currentUserId = user?.id || (user as any)?.userId;
       // Don't notify if the message is sent by current user
       if (currentUserId && data.senderId === currentUserId) return;
 
@@ -119,7 +140,16 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [isAuthenticated, user, segments, showNotification]);
 
   return (
-    <NotificationContext.Provider value={{ activeNotification, dismissNotification, showNotification }}>
+    <NotificationContext.Provider
+      value={{
+        activeNotification,
+        unreadCount: unreadMatchIds.length,
+        unreadMatchIds,
+        dismissNotification,
+        showNotification,
+        clearUnreadMatch,
+      }}
+    >
       {children}
     </NotificationContext.Provider>
   );

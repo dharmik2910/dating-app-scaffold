@@ -16,11 +16,23 @@ export function getSocket(): Socket {
       reconnectionDelay: 1000,
       transports: ['websocket', 'polling'],
     });
+
+    socket.on('connect', () => {
+      const currentToken = getAuthToken();
+      if (currentToken) {
+        socket?.emit('authenticate', { token: currentToken });
+      }
+    });
   } else if (token && socket.auth && (socket.auth as any).token !== token) {
     socket.auth = { token };
     if (socket.connected) {
-      socket.disconnect().connect();
+      socket.emit('authenticate', { token });
+    } else {
+      socket.connect();
     }
+  } else if (token && !socket.connected) {
+    socket.auth = { token };
+    socket.connect();
   }
 
   return socket;

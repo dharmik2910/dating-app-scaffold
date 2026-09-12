@@ -6,15 +6,16 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   TextInput,
   ActivityIndicator,
   Alert,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { mobileApi } from '@/services/api';
@@ -116,8 +117,8 @@ export default function ProfileScreen() {
       prev.includes(interestId)
         ? prev.filter((i) => i !== interestId)
         : prev.length < 6
-        ? [...prev, interestId]
-        : prev
+          ? [...prev, interestId]
+          : prev
     );
   };
 
@@ -149,7 +150,7 @@ export default function ProfileScreen() {
       const fullBio = formatBioWithInterests(bioText, selectedInterests);
 
       await mobileApi.updateProfile({
-        name,
+        name: name.trim(),
         gender,
         interestedIn: interestedInArray,
         bio: fullBio,
@@ -164,44 +165,41 @@ export default function ProfileScreen() {
     }
   }
 
-  function handlePhotoAdd() {
-    if (photos.length >= 6) return;
+  async function handlePhotoAdd() {
+    if (photos.length >= 6) {
+      Alert.alert('Limit Reached', 'You can upload up to 6 photos.');
+      return;
+    }
 
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.onchange = async (e: any) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted' && Platform.OS !== 'web') {
+        Alert.alert('Permission needed', 'Please allow gallery access to upload photos.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [3, 4],
+        quality: 0.85,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
         setUploadingPhoto(true);
         try {
-          await mobileApi.uploadPhoto(URL.createObjectURL(file), photos.length);
+          await mobileApi.uploadPhoto(result.assets[0].uri, photos.length);
           await fetchProfile();
-        } catch (err) {
+        } catch (err: any) {
           console.warn('Upload photo error:', err);
+          Alert.alert('Upload Error', err?.message || 'Failed to upload photo.');
         } finally {
           setUploadingPhoto(false);
         }
-      };
-      input.click();
-    } else {
-      const samplePhotos = [
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=600&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=600&auto=format&fit=crop',
-        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=600&auto=format&fit=crop',
-      ];
-      setUploadingPhoto(true);
-      const nextUri = samplePhotos[photos.length % samplePhotos.length];
-
-      mobileApi
-        .uploadPhoto(nextUri, photos.length)
-        .then(async () => {
-          await fetchProfile();
-        })
-        .catch((err) => console.warn('Upload photo error:', err))
-        .finally(() => setUploadingPhoto(false));
+      }
+    } catch (e: any) {
+      console.warn('Pick image error:', e);
+      Alert.alert('Error', 'Failed to pick image.');
     }
   }
 
@@ -226,7 +224,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
       {/* Top Studio Header Section */}
@@ -235,13 +233,13 @@ export default function ProfileScreen() {
           <View style={styles.iconCircle}>
             <Ionicons name="person" size={20} color="#f43f5e" />
           </View>
-          <View>
+          <View style={styles.headerTitleGroup}>
             <Text style={styles.headerTitle}>Profile Studio</Text>
-            <Text style={styles.headerSub}>Manage profile details & preferences</Text>
+            <Text style={styles.headerSub}>Manage profile details & photos</Text>
           </View>
         </View>
 
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleLogout}>
+        <TouchableOpacity style={styles.signOutBtn} onPress={handleLogout} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={16} color="#f43f5e" />
           <Text style={styles.signOutBtnText}>Sign Out</Text>
         </TouchableOpacity>
@@ -258,6 +256,7 @@ export default function ProfileScreen() {
           keyboardShouldPersistTaps="handled"
           onScroll={handleScroll}
           scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
         >
           {/* Profile Strength Meter Card */}
           <View style={styles.cardContainer}>
@@ -306,7 +305,7 @@ export default function ProfileScreen() {
                     bioText.trim().length > 10 ? styles.checkTextActive : styles.checkTextInactive,
                   ]}
                 >
-                  Detailed Bio
+                  Bio added
                 </Text>
               </View>
 
@@ -329,14 +328,88 @@ export default function ProfileScreen() {
             </View>
           </View>
 
+          {/* Photos & Media Section Card (Primary Dating Profile Card) */}
+          <View style={styles.cardContainer}>
+            <View style={styles.cardHeaderRow}>
+              <View style={styles.cardHeaderInfo}>
+                <View style={styles.cardHeaderTitleRow}>
+                  <Ionicons name="images" size={18} color="#f43f5e" />
+                  <Text style={styles.cardSectionTitle}>Photos & Media</Text>
+                </View>
+                <Text style={styles.cardHeaderSub} numberOfLines={1}>
+                  First photo is your main discovery card photo
+                </Text>
+              </View>
+              <View style={styles.countBadge}>
+                <Text style={styles.countBadgeText}>{photos.length} / 6</Text>
+              </View>
+            </View>
+
+            <View style={styles.photoGridContainer}>
+              {photos.map((photoItem, idx) => {
+                const photoUrl = typeof photoItem === 'string' ? photoItem : photoItem.url;
+                const photoId = typeof photoItem === 'string' ? photoItem : photoItem.id;
+                const isDeleting = deletingPhotoId === photoId;
+
+                return (
+                  <View key={idx} style={styles.photoCardItem}>
+                    <Image source={{ uri: photoUrl }} style={styles.photoCardImg} resizeMode="cover" />
+                    {idx === 0 && (
+                      <View style={styles.mainPhotoTag}>
+                        <Ionicons name="star" size={10} color="#ffffff" />
+                        <Text style={styles.mainPhotoTagText}>MAIN</Text>
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.deletePhotoTrashBtn}
+                      onPress={() => handleDeletePhoto(photoItem)}
+                      disabled={isDeleting}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      {isDeleting ? (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      ) : (
+                        <Ionicons name="trash-outline" size={14} color="#ffffff" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+
+              {photos.length < 6 && (
+                <TouchableOpacity
+                  style={styles.addPhotoDashedCard}
+                  onPress={handlePhotoAdd}
+                  disabled={uploadingPhoto}
+                  activeOpacity={0.8}
+                >
+                  {uploadingPhoto ? (
+                    <ActivityIndicator color="#f43f5e" size="small" />
+                  ) : (
+                    <>
+                      <View style={styles.plusCircleBadge}>
+                        <Ionicons name="add" size={22} color="#f43f5e" />
+                      </View>
+                      <Text style={styles.addPhotoTitle}>Add Photo</Text>
+                      <Text style={styles.addPhotoFormatText}>Camera / Gallery</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
           {/* Profile Details Form Card */}
           <View style={styles.cardContainer}>
             <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderTitleRow}>
-                <Ionicons name="person" size={20} color="#f43f5e" />
-                <Text style={styles.cardSectionTitle}>Profile Details</Text>
+              <View style={styles.cardHeaderInfo}>
+                <View style={styles.cardHeaderTitleRow}>
+                  <Ionicons name="person" size={18} color="#f43f5e" />
+                  <Text style={styles.cardSectionTitle}>Basic Details</Text>
+                </View>
+                <Text style={styles.cardHeaderSub}>How other members see you</Text>
               </View>
-              <Text style={styles.cardHeaderSub}>Personal Information</Text>
             </View>
 
             {/* Display Name Input */}
@@ -354,7 +427,7 @@ export default function ProfileScreen() {
             {/* Gender & Interested In Selection */}
             <View style={styles.formRow2Col}>
               <View style={styles.formCol}>
-                <Text style={styles.uppercaseLabel}>Gender</Text>
+                <Text style={styles.uppercaseLabel}>I am</Text>
                 <View style={styles.segmentedControl}>
                   {[
                     { label: 'Male', val: 'MALE' },
@@ -365,6 +438,7 @@ export default function ProfileScreen() {
                       key={g.val}
                       style={[styles.segmentBtn, gender === g.val && styles.segmentBtnActive]}
                       onPress={() => setGender(g.val)}
+                      activeOpacity={0.8}
                     >
                       <Text style={[styles.segmentText, gender === g.val && styles.segmentTextActive]}>
                         {g.label}
@@ -386,6 +460,7 @@ export default function ProfileScreen() {
                       key={p.val}
                       style={[styles.segmentBtn, preference === p.val && styles.segmentBtnActive]}
                       onPress={() => setPreference(p.val)}
+                      activeOpacity={0.8}
                     >
                       <Text style={[styles.segmentText, preference === p.val && styles.segmentTextActive]}>
                         {p.label}
@@ -395,142 +470,85 @@ export default function ProfileScreen() {
                 </View>
               </View>
             </View>
-
-            {/* Bio Textarea */}
-            <View style={styles.formGroup}>
-              <View style={styles.labelWithCounterRow}>
-                <Text style={styles.uppercaseLabel}>Bio</Text>
-                <Text style={styles.counterText}>{bioText.length} / 500 characters</Text>
-              </View>
-              <TextInput
-                style={[styles.textInput, styles.textAreaInput]}
-                placeholder="Tell potential matches about your hobbies, passions, or what makes you smile..."
-                placeholderTextColor="#71717a"
-                value={bioText}
-                onChangeText={setBioText}
-                multiline
-                numberOfLines={4}
-                maxLength={500}
-              />
-            </View>
-
-            {/* Passions & Interests Selector */}
-            <View style={styles.interestsSection}>
-              <View style={styles.labelWithCounterRow}>
-                <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="sparkles" size={16} color="#fbbf24" />
-                  <Text style={styles.subSectionTitle}>Passions & Interests</Text>
-                </View>
-                <Text style={styles.counterText}>{selectedInterests.length} / 6 selected</Text>
-              </View>
-              <Text style={styles.subSectionSubtitle}>
-                Pick up to 6 interests to display on your candidate profile card
-              </Text>
-
-              <View style={styles.pillsWrapGrid}>
-                {POPULAR_INTERESTS.map((interest) => {
-                  const isSelected = selectedInterests.includes(interest.id);
-                  return (
-                    <TouchableOpacity
-                      key={interest.id}
-                      style={[styles.interestPill, isSelected && styles.interestPillSelected]}
-                      onPress={() => toggleInterest(interest.id)}
-                    >
-                      <Text style={[styles.interestPillText, isSelected && styles.interestTextSelected]}>
-                        {interest.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Save Profile Updates Action Button */}
-            <TouchableOpacity
-              style={[styles.gradientSaveBtn, saving && styles.btnDisabled]}
-              onPress={handleSaveProfile}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="#ffffff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="save-outline" size={18} color="#ffffff" />
-                  <Text style={styles.gradientSaveBtnText}>Save Profile Updates</Text>
-                </>
-              )}
-            </TouchableOpacity>
           </View>
 
-          {/* Photos & Media Section Card */}
+          {/* About Me / Bio Card */}
           <View style={styles.cardContainer}>
             <View style={styles.cardHeaderRow}>
-              <View>
+              <View style={styles.cardHeaderInfo}>
                 <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="images" size={20} color="#f43f5e" />
-                  <Text style={styles.cardSectionTitle}>Photos & Media</Text>
+                  <Ionicons name="chatbox-ellipses" size={18} color="#f43f5e" />
+                  <Text style={styles.cardSectionTitle}>About Me</Text>
+                </View>
+                <Text style={styles.cardHeaderSub}>Share what makes you unique</Text>
+              </View>
+              <Text style={styles.counterText}>{bioText.length}/500</Text>
+            </View>
+
+            <TextInput
+              style={[styles.textInput, styles.textAreaInput]}
+              placeholder="Tell potential matches about your hobbies, passions, or what makes you smile..."
+              placeholderTextColor="#71717a"
+              value={bioText}
+              onChangeText={setBioText}
+              multiline
+              numberOfLines={4}
+              maxLength={500}
+            />
+          </View>
+
+          {/* Passions & Interests Selector Card */}
+          <View style={styles.cardContainer}>
+            <View style={styles.cardHeaderRow}>
+              <View style={styles.cardHeaderInfo}>
+                <View style={styles.cardHeaderTitleRow}>
+                  <Ionicons name="sparkles" size={18} color="#fbbf24" />
+                  <Text style={styles.cardSectionTitle}>Passions & Interests</Text>
                 </View>
                 <Text style={styles.cardHeaderSub}>
-                  Upload up to 6 photos. First photo is main profile photo.
+                  Pick up to 6 interests for your profile card
                 </Text>
               </View>
               <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>{photos.length} / 6</Text>
+                <Text style={styles.countBadgeText}>{selectedInterests.length} / 6</Text>
               </View>
             </View>
 
-            <View style={styles.photoGridContainer}>
-              {photos.map((photoItem, idx) => {
-                const photoUrl = typeof photoItem === 'string' ? photoItem : photoItem.url;
-                const photoId = typeof photoItem === 'string' ? photoItem : photoItem.id;
-                const isDeleting = deletingPhotoId === photoId;
-
+            <View style={styles.pillsWrapGrid}>
+              {POPULAR_INTERESTS.map((interest) => {
+                const isSelected = selectedInterests.includes(interest.id);
                 return (
-                  <View key={idx} style={styles.photoCardItem}>
-                    <Image source={{ uri: photoUrl }} style={styles.photoCardImg} />
-                    {idx === 0 && (
-                      <View style={styles.mainPhotoTag}>
-                        <Ionicons name="star" size={10} color="#ffffff" />
-                        <Text style={styles.mainPhotoTagText}>MAIN PHOTO</Text>
-                      </View>
-                    )}
-
-                    <TouchableOpacity
-                      style={styles.deletePhotoTrashBtn}
-                      onPress={() => handleDeletePhoto(photoItem)}
-                      disabled={isDeleting}
-                    >
-                      {isDeleting ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <Ionicons name="trash-outline" size={16} color="#ffffff" />
-                      )}
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    key={interest.id}
+                    style={[styles.interestPill, isSelected && styles.interestPillSelected]}
+                    onPress={() => toggleInterest(interest.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.interestPillText, isSelected && styles.interestTextSelected]}>
+                      {interest.label}
+                    </Text>
+                  </TouchableOpacity>
                 );
               })}
-
-              {photos.length < 6 && (
-                <TouchableOpacity
-                  style={styles.addPhotoDashedCard}
-                  onPress={handlePhotoAdd}
-                  disabled={uploadingPhoto}
-                >
-                  {uploadingPhoto ? (
-                    <ActivityIndicator color="#f43f5e" size="small" />
-                  ) : (
-                    <>
-                      <View style={styles.plusCircleBadge}>
-                        <Ionicons name="add" size={20} color="#f43f5e" />
-                      </View>
-                      <Text style={styles.addPhotoTitle}>Add Photo</Text>
-                      <Text style={styles.addPhotoFormatText}>JPEG/PNG</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
             </View>
           </View>
+
+          {/* Save Profile Button */}
+          <TouchableOpacity
+            style={[styles.gradientSaveBtn, saving && styles.btnDisabled]}
+            onPress={handleSaveProfile}
+            disabled={saving}
+            activeOpacity={0.85}
+          >
+            {saving ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : (
+              <>
+                <Ionicons name="save" size={18} color="#ffffff" />
+                <Text style={styles.gradientSaveBtnText}>Save Profile Updates</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -556,15 +574,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#18181b',
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    flex: 1,
+  },
+  headerTitleGroup: {
+    flex: 1,
   },
   iconCircle: {
     width: 36,
@@ -575,13 +597,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
     color: '#ffffff',
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
   headerSub: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#a1a1aa',
     marginTop: 1,
   },
@@ -604,15 +626,15 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 16,
-    paddingBottom: 40,
+    paddingBottom: 90,
   },
   cardContainer: {
     backgroundColor: '#18181b',
-    borderRadius: 24,
-    padding: 20,
+    borderRadius: 22,
+    padding: 18,
     borderWidth: 1,
     borderColor: '#27272a',
-    gap: 16,
+    gap: 14,
   },
   meterTopRow: {
     flexDirection: 'row',
@@ -630,9 +652,9 @@ const styles = StyleSheet.create({
     color: '#f43f5e',
   },
   progressBarTrack: {
-    height: 10,
+    height: 8,
     backgroundColor: '#09090b',
-    borderRadius: 5,
+    borderRadius: 4,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#27272a',
@@ -640,7 +662,7 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     backgroundColor: '#f43f5e',
-    borderRadius: 5,
+    borderRadius: 4,
   },
   checklistRow: {
     flexDirection: 'row',
@@ -652,8 +674,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingVertical: 5,
+    borderRadius: 10,
     borderWidth: 1,
   },
   checkPillActive: {
@@ -680,20 +702,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: '#27272a',
-    paddingBottom: 12,
+    paddingBottom: 10,
+  },
+  cardHeaderInfo: {
+    flex: 1,
+    paddingRight: 10,
   },
   cardHeaderTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
   },
   cardSectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#ffffff',
   },
   cardHeaderSub: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#a1a1aa',
     marginTop: 2,
   },
@@ -752,29 +778,10 @@ const styles = StyleSheet.create({
   segmentTextActive: {
     color: '#ffffff',
   },
-  labelWithCounterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   counterText: {
     fontSize: 11,
     color: '#71717a',
-    fontWeight: '500',
-  },
-  interestsSection: {
-    gap: 8,
-    marginTop: 4,
-  },
-  subSectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  subSectionSubtitle: {
-    fontSize: 12,
-    color: '#a1a1aa',
-    marginBottom: 4,
+    fontWeight: '600',
   },
   pillsWrapGrid: {
     flexDirection: 'row',
@@ -783,8 +790,8 @@ const styles = StyleSheet.create({
   },
   interestPill: {
     paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
+    paddingVertical: 8,
+    borderRadius: 18,
     backgroundColor: '#09090b',
     borderWidth: 1,
     borderColor: '#27272a',
@@ -807,9 +814,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: '#f43f5e',
-    paddingVertical: 14,
-    borderRadius: 16,
-    marginTop: 8,
+    paddingVertical: 15,
+    borderRadius: 18,
+    marginTop: 4,
+    shadowColor: '#f43f5e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   gradientSaveBtnText: {
     fontSize: 15,
@@ -820,28 +832,28 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   countBadge: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 10,
     backgroundColor: '#09090b',
     borderWidth: 1,
     borderColor: '#27272a',
   },
   countBadgeText: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#a1a1aa',
+    fontWeight: '700',
+    color: '#d4d4d8',
   },
   photoGridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
   },
   photoCardItem: {
     position: 'relative',
-    width: '47%',
+    width: '31.3%',
     aspectRatio: 3 / 4,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: '#09090b',
     borderWidth: 1,
@@ -853,60 +865,65 @@ const styles = StyleSheet.create({
   },
   mainPhotoTag: {
     position: 'absolute',
-    top: 8,
-    left: 8,
+    top: 6,
+    left: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     backgroundColor: 'rgba(244, 63, 94, 0.9)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   mainPhotoTagText: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '800',
     color: '#ffffff',
   },
   deletePhotoTrashBtn: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(244, 63, 94, 0.85)',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   addPhotoDashedCard: {
-    width: '47%',
+    width: '31.3%',
     aspectRatio: 3 / 4,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1.5,
     borderColor: '#3f3f46',
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#09090b',
-    gap: 4,
+    gap: 3,
+    padding: 6,
   },
   plusCircleBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(244, 63, 94, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
   addPhotoTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#ffffff',
+    textAlign: 'center',
   },
   addPhotoFormatText: {
-    fontSize: 10,
+    fontSize: 9,
     color: '#71717a',
+    textAlign: 'center',
   },
 });

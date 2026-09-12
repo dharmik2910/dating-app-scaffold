@@ -5,12 +5,12 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   StatusBar,
   ScrollView,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth, needsOnboarding } from '@/context/AuthContext';
@@ -27,6 +27,7 @@ export default function AuthScreen() {
   const [loginStep, setLoginStep] = useState<'phone' | 'otp'>('phone');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
+  const [devOtp, setDevOtp] = useState<string>('123456');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -52,7 +53,10 @@ export default function AuthScreen() {
 
     try {
       const normalizedPhone = phone.replace(/\s/g, '');
-      await loginWithPhone(normalizedPhone);
+      const res: any = await loginWithPhone(normalizedPhone);
+      if (res?.devOtp) {
+        setDevOtp(res.devOtp);
+      }
       setLoginStep('otp');
     } catch (e: any) {
       setError(e.message || 'Failed to send code. Please try again.');
@@ -62,7 +66,7 @@ export default function AuthScreen() {
   }
 
   async function handleVerifyOtp() {
-    if (!otp || otp.length < 4) {
+    if (!otp || otp.trim().length < 4) {
       setError('Please enter a valid verification code');
       return;
     }
@@ -70,7 +74,8 @@ export default function AuthScreen() {
     setError('');
 
     try {
-      await verifyOtp(otp);
+      const normalizedPhone = phone.replace(/\s/g, '');
+      await verifyOtp(otp.trim(), normalizedPhone);
       const updatedUser = await refreshUser();
       if (needsOnboarding(updatedUser)) {
         router.replace('/onboarding');
@@ -104,7 +109,7 @@ export default function AuthScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
       {/* Top Bar with Back Button when in OTP Step */}
@@ -128,8 +133,8 @@ export default function AuthScreen() {
           <View style={styles.flameIconCircle}>
             <Ionicons name="flame" size={40} color="#f43f5e" />
           </View>
-          <Text style={styles.brandTitle}>Welcome to Ember</Text>
-          <Text style={styles.brandSubtitle}>Sign in with your phone number to continue.</Text>
+          <Text style={styles.brandTitle}>Welcome to Lovora</Text>
+          <Text style={styles.brandSubtitle}>Enter your +91 mobile number to sign in or register.</Text>
         </View>
 
         {/* Login Card */}
@@ -158,7 +163,7 @@ export default function AuthScreen() {
                 {loading ? (
                   <ActivityIndicator color="#ffffff" size="small" />
                 ) : (
-                  <Text style={styles.primaryActionBtnText}>Send code</Text>
+                  <Text style={styles.primaryActionBtnText}>Send SMS code</Text>
                 )}
               </TouchableOpacity>
 
@@ -181,10 +186,29 @@ export default function AuthScreen() {
             </>
           ) : (
             <>
-              <Text style={styles.otpHeading}>Enter 6-digit verification code</Text>
+              <Text style={styles.otpHeading}>Enter 6-digit SMS verification code</Text>
               <Text style={styles.otpSubtext}>
-                Sent to {phone || '+91 98765 43210'}
+                Sent via SMS to {phone || '+91 98765 43210'}
               </Text>
+
+              {/* Dev Test OTP helper box */}
+              <TouchableOpacity
+                style={styles.devOtpBox}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setOtp(devOtp || '123456');
+                  if (error) setError('');
+                }}
+              >
+                <View style={styles.devOtpHeader}>
+                  <Ionicons name="flask-outline" size={16} color="#f43f5e" />
+                  <Text style={styles.devOtpLabel}>Test Verification Code:</Text>
+                  <View style={styles.devOtpBadge}>
+                    <Text style={styles.devOtpCode}>{devOtp || '123456'}</Text>
+                  </View>
+                </View>
+                <Text style={styles.devOtpAction}>Tap to auto-fill code</Text>
+              </TouchableOpacity>
 
               <TextInput
                 style={styles.otpInputField}
@@ -213,9 +237,8 @@ export default function AuthScreen() {
 
               <TouchableOpacity
                 style={styles.resendCodeLink}
-                onPress={() => {
-                  Alert.alert('Code Resent', 'A fresh verification code has been dispatched via SMS.');
-                }}
+                onPress={handleSendOtp}
+                disabled={loading}
               >
                 <Text style={styles.resendCodeText}>Didn't receive code? Resend SMS</Text>
               </TouchableOpacity>
@@ -362,6 +385,48 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#a1a1aa',
     marginBottom: 16,
+  },
+  devOtpBox: {
+    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.3)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  devOtpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  devOtpLabel: {
+    fontSize: 12,
+    color: '#d4d4d8',
+    fontWeight: '500',
+  },
+  devOtpBadge: {
+    backgroundColor: '#09090b',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  devOtpCode: {
+    fontFamily: 'monospace',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 2,
+  },
+  devOtpAction: {
+    fontSize: 11,
+    color: '#f43f5e',
+    fontWeight: '600',
+    marginTop: 4,
+    textDecorationLine: 'underline',
   },
   otpInputField: {
     backgroundColor: '#09090b',

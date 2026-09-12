@@ -8,13 +8,13 @@ import {
   ScrollView,
   TextInput,
   Modal,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Dimensions,
   RefreshControl,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
@@ -122,7 +122,7 @@ function parseBioContent(bioStr?: string) {
 
 export default function DiscoverScreen() {
   const router = useRouter();
-  const { logout, user } = useAuth();
+  const { logout, user, isAuthenticated } = useAuth();
   const { handleScroll: handleTabBarScroll, headerTranslateY } = useTabBarVisibility();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidateCities, setCandidateCities] = useState<Record<string, string>>({});
@@ -233,16 +233,19 @@ export default function DiscoverScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Re-sync likes whenever screen comes into focus
+      // Automatically refresh discovery feed and sync whenever screen comes into focus
+      fetchCandidates();
       syncLikesWithBackend();
       fetchStories();
     }, [syncLikesWithBackend])
   );
 
   useEffect(() => {
-    fetchCandidates();
-    fetchStories();
-  }, []);
+    if (isAuthenticated) {
+      fetchCandidates();
+      fetchStories();
+    }
+  }, [isAuthenticated]);
 
   function fetchStories() {
     mobileApi
@@ -426,7 +429,7 @@ export default function DiscoverScreen() {
   }, [candidates]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
       {/* Top Search & Filter Bar */}
@@ -619,12 +622,29 @@ export default function DiscoverScreen() {
           );
         })()}
 
-        {/* Loading Spinner */}
+        {/* Loading State */}
         {loading ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#f43f5e" />
-            <Text style={styles.loadingText}>Loading profiles...</Text>
-          </View>
+          viewMode === 'grid2' ? (
+            <View style={styles.grid2Container}>
+              {[1, 2, 3, 4].map((i) => (
+                <View key={i} style={styles.skeletonGrid2Card}>
+                  <View style={styles.skeletonCardTop}>
+                    <View style={styles.skeletonStatusPill} />
+                    <View style={styles.skeletonHeartBtn} />
+                  </View>
+                  <View style={styles.skeletonBottomOverlay}>
+                    <View style={styles.skeletonNameBar} />
+                    <View style={styles.skeletonLocBar} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#f43f5e" />
+              <Text style={styles.loadingText}>Loading profiles...</Text>
+            </View>
+          )
         ) : filteredCandidates.length === 0 ? (
           <View style={styles.emptyFeedBox}>
             <Ionicons name="sparkles" size={44} color="#fbbf24" />
@@ -1381,6 +1401,50 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
   },
+  skeletonGrid2Card: {
+    width: '48.2%',
+    aspectRatio: 3 / 4,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#18181b',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    justifyContent: 'space-between',
+    padding: 12,
+  },
+  skeletonCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  skeletonStatusPill: {
+    width: 54,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#27272a',
+  },
+  skeletonHeartBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#27272a',
+  },
+  skeletonBottomOverlay: {
+    gap: 6,
+  },
+  skeletonNameBar: {
+    width: '60%',
+    height: 14,
+    borderRadius: 6,
+    backgroundColor: '#27272a',
+  },
+  skeletonLocBar: {
+    width: '40%',
+    height: 10,
+    borderRadius: 4,
+    backgroundColor: '#222226',
+  },
   feedScrollContent: {
     paddingBottom: 40,
   },
@@ -1392,7 +1456,7 @@ const styles = StyleSheet.create({
     rowGap: 12,
   },
   grid2Card: {
-    width: (SCREEN_WIDTH - 44) / 2,
+    width: '48.2%',
     aspectRatio: 3 / 4,
     borderRadius: 20,
     overflow: 'hidden',

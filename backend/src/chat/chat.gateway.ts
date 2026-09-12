@@ -46,7 +46,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!token) {
         return;
       }
-      const payload = this.jwt.verify(token, { secret: process.env.JWT_SECRET });
+      const secret = process.env.JWT_SECRET || 'change-me';
+      const payload = this.jwt.verify(token, { secret });
       const userId = payload.sub;
       if (!userId) return;
       (client.data as any).userId = userId;
@@ -82,7 +83,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const token = data?.token || client.handshake.auth?.token;
       if (!token) return { success: false };
-      const payload = this.jwt.verify(token, { secret: process.env.JWT_SECRET });
+      const secret = process.env.JWT_SECRET || 'change-me';
+      const payload = this.jwt.verify(token, { secret });
       const userId = payload.sub;
       if (userId) {
         (client.data as any).userId = userId;

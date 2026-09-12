@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Dimensions,
   Modal,
   Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
@@ -190,7 +190,7 @@ export default function MatchesScreen() {
   }, [matches]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
       {/* Top Search & Filter Bar */}
@@ -676,7 +676,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   grid2Card: {
-    width: (SCREEN_WIDTH - 34) / 2,
+    width: '48.2%',
     height: 240,
     borderRadius: 20,
     overflow: 'hidden',
