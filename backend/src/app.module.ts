@@ -9,6 +9,10 @@ import { SwipesModule } from './swipes/swipes.module';
 import { MatchesModule } from './matches/matches.module';
 import { ChatModule } from './chat/chat.module';
 import { StoriesModule } from './stories/stories.module';
+import { SafetyModule } from './safety/safety.module';
+import { AiModule } from './ai/ai.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -22,6 +26,10 @@ import { StoriesModule } from './stories/stories.module';
     MatchesModule,
     ChatModule,
     StoriesModule,
+    SafetyModule,
+    AiModule,
+    NotificationsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

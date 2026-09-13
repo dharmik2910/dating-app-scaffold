@@ -11,143 +11,62 @@ import {
   ActivityIndicator,
   Dimensions,
   Modal,
-  Animated,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
-import { Match, Candidate } from '@/constants/mockData';
+import { usePresence } from '@/context/PresenceContext';
+import { Match } from '@/constants/mockData';
 import { mobileApi } from '@/services/api';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type MatchesViewMode = 'grid2' | 'grid1' | 'list';
-
-const CITY_CACHE_STORAGE_KEY = 'ember_city_lookup_cache';
-
-function getInitialCityCache(): Record<string, string> {
-  if (typeof window === 'undefined' || !window.localStorage) return {};
-  try {
-    const stored = window.localStorage.getItem(CITY_CACHE_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-}
-
-let cityLookupCache: Record<string, string> = getInitialCityCache();
-
-function saveCityCache(key: string, label: string) {
-  cityLookupCache[key] = label;
-  if (typeof window !== 'undefined' && window.localStorage) {
-    try {
-      window.localStorage.setItem(CITY_CACHE_STORAGE_KEY, JSON.stringify(cityLookupCache));
-    } catch {}
-  }
-}
-
-function parseCityFromBio(bio?: string): string {
-  if (!bio) return '';
-  const match = bio.match(/\[CITY:(.*?)\]/i);
-  if (match && match[1]) return match[1].trim();
-  return '';
-}
+type MainTab = 'matches' | 'likes_you';
 
 export default function MatchesScreen() {
   const router = useRouter();
   const { handleScroll } = useTabBarVisibility();
+  const { formatUserActivity, queryPresence } = usePresence();
+
+  const [activeTab, setActiveTab] = useState<MainTab>('matches');
   const [searchQuery, setSearchQuery] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
-  const [matchCities, setMatchCities] = useState<Record<string, string>>({});
+  const [likesYou, setLikesYou] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<MatchesViewMode>('grid2');
   const [statusFilter, setStatusFilter] = useState<'all' | 'online'>('all');
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
-  const [modalPhotoIdx, setModalPhotoIdx] = useState<number>(0);
-
-  function getCachedMatchCitiesSync(items: Match[]): Record<string, string> {
-    const resolved: Record<string, string> = {};
-    for (const m of items) {
-      if (!m?.user) continue;
-      const bioCity = parseCityFromBio(m.user.bio);
-      if (bioCity) {
-        resolved[m.id] = bioCity;
-      } else if (m.user.latitude != null && m.user.longitude != null) {
-        const latNum = Number(m.user.latitude);
-        const lngNum = Number(m.user.longitude);
-        if (!isNaN(latNum) && !isNaN(lngNum)) {
-          const key = `${latNum.toFixed(3)},${lngNum.toFixed(3)}`;
-          if (cityLookupCache[key]) {
-            resolved[m.id] = cityLookupCache[key];
-          }
-        }
-      }
-    }
-    return resolved;
-  }
-
-  async function resolveCitiesForMatches(items: Match[]) {
-    const toLookup = items.filter((m) => {
-      if (!m?.user) return false;
-      const bioCity = parseCityFromBio(m.user.bio);
-      if (bioCity) return false;
-      if (m.user.latitude == null || m.user.longitude == null) return false;
-      const latNum = Number(m.user.latitude);
-      const lngNum = Number(m.user.longitude);
-      if (isNaN(latNum) || isNaN(lngNum)) return false;
-      const key = `${latNum.toFixed(3)},${lngNum.toFixed(3)}`;
-      return !cityLookupCache[key];
-    });
-
-    if (toLookup.length === 0) return;
-
-    await Promise.all(
-      toLookup.map(async (m) => {
-        const latNum = Number(m.user.latitude);
-        const lngNum = Number(m.user.longitude);
-        const key = `${latNum.toFixed(3)},${lngNum.toFixed(3)}`;
-        try {
-          const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lngNum}&localityLanguage=en`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const city = data.city || data.locality || data.principalSubdivision;
-            const country = data.countryName || data.countryCode;
-            const label = city ? (country ? `${city}, ${country}` : city) : '';
-            if (label) {
-              saveCityCache(key, label);
-              setMatchCities((prev) => ({ ...prev, [m.id]: label }));
-            }
-          }
-        } catch (err) {
-          console.warn('Async match city lookup error:', err);
-        }
-      })
-    );
-  }
 
   useFocusEffect(
     useCallback(() => {
-      fetchMatches();
-    }, [])
+      fetchData();
+    }, []),
   );
 
-  function fetchMatches() {
+  async function fetchData() {
     setLoading(true);
-    mobileApi
-      .getMatches(undefined, 50, 'matches')
-      .then((remoteMatches) => {
-        if (remoteMatches) {
-          const initialCities = getCachedMatchCitiesSync(remoteMatches);
-          setMatchCities((prev) => ({ ...prev, ...initialCities }));
-          setMatches(remoteMatches);
-          resolveCitiesForMatches(remoteMatches);
-        }
-      })
-      .catch((err) => console.warn('Fetch matches error:', err))
-      .finally(() => setLoading(false));
+    try {
+      const [remoteMatches, inboundLikes] = await Promise.all([
+        mobileApi.getMatches(undefined, 50, 'matches'),
+        mobileApi.getWhoLikedMe().catch(() => []),
+      ]);
+
+      if (remoteMatches) {
+        setMatches(remoteMatches);
+        queryPresence(remoteMatches.map((m) => m.user?.id).filter(Boolean));
+      }
+
+      if (Array.isArray(inboundLikes)) {
+        setLikesYou(inboundLikes);
+      }
+    } catch (err) {
+      console.warn('Fetch matches & likes error:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleUnmatch(matchId: string, otherUserId?: string) {
@@ -157,22 +76,28 @@ export default function MatchesScreen() {
     }
     try {
       if (otherUserId) {
-        await mobileApi.swipe(otherUserId, 'UNLIKE');
+        await mobileApi.blockUser(otherUserId);
       }
     } catch (e) {
       console.warn('Unmatch error:', e);
-      fetchMatches();
     }
   }
 
-  function openMatchProfile(match: Match) {
-    setModalPhotoIdx(0);
-    setSelectedMatch(match);
+  async function handleInstantMatch(admirer: any) {
+    try {
+      await mobileApi.swipe(admirer.user.id, 'LIKE');
+      setLikesYou((prev) => prev.filter((l) => l.swiperId !== admirer.swiperId));
+      fetchData();
+      router.push(`/chat/${admirer.user.id}` as any);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Could not match with admirer');
+    }
   }
 
   const filteredMatches = useMemo(() => {
     return matches.filter((m) => {
-      if (statusFilter === 'online' && !m.user.online) {
+      const activity = formatUserActivity(m.user?.id, m.user?.lastActiveAt, m.user?.online);
+      if (statusFilter === 'online' && !activity.isOnline) {
         return false;
       }
       if (searchQuery.trim()) {
@@ -183,391 +108,294 @@ export default function MatchesScreen() {
       }
       return true;
     });
-  }, [matches, statusFilter, searchQuery]);
+  }, [matches, statusFilter, searchQuery, formatUserActivity]);
 
   const onlineCount = useMemo(() => {
-    return matches.filter((m) => m.user.online).length;
-  }, [matches]);
+    return matches.filter(
+      (m) => formatUserActivity(m.user?.id, m.user?.lastActiveAt, m.user?.online).isOnline,
+    ).length;
+  }, [matches, formatUserActivity]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
-      {/* Top Search & Filter Bar */}
-      <View style={styles.topControlBar}>
-        {/* Search Input Box */}
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={16} color="#71717a" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search matches..."
-            placeholderTextColor="#71717a"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
+      {/* Main Tab Switcher */}
+      <View style={styles.tabSwitcher}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'matches' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('matches')}
+        >
+          <Ionicons
+            name="heart"
+            size={16}
+            color={activeTab === 'matches' ? '#FF4B72' : '#71717A'}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={16} color="#71717a" />
-            </TouchableOpacity>
-          )}
-        </View>
+          <Text style={[styles.tabBtnText, activeTab === 'matches' && styles.tabBtnTextActive]}>
+            Mutual Matches ({matches.length})
+          </Text>
+        </TouchableOpacity>
 
-        {/* All / Online Toggle Pill */}
-        <View style={styles.filterPillGroup}>
-          <TouchableOpacity
-            style={[styles.filterBtn, statusFilter === 'all' && styles.filterBtnActive]}
-            onPress={() => setStatusFilter('all')}
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'likes_you' && styles.tabBtnActiveGold]}
+          onPress={() => setActiveTab('likes_you')}
+        >
+          <Ionicons
+            name="star"
+            size={16}
+            color={activeTab === 'likes_you' ? '#F59E0B' : '#71717A'}
+          />
+          <Text
+            style={[styles.tabBtnText, activeTab === 'likes_you' && styles.tabBtnTextActiveGold]}
           >
-            <Text style={[styles.filterBtnText, statusFilter === 'all' && styles.filterBtnTextActive]}>
-              All
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterBtn, statusFilter === 'online' && styles.filterBtnActive]}
-            onPress={() => setStatusFilter('online')}
-          >
-            <View style={styles.onlineDotIndicator} />
-            <Text style={[styles.filterBtnText, statusFilter === 'online' && styles.filterBtnTextActive]}>
-              {onlineCount}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* View Mode Toggle */}
-        <View style={styles.viewToggleGroup}>
-          <TouchableOpacity
-            style={[styles.viewIconBtn, viewMode === 'grid1' && styles.viewIconBtnActive]}
-            onPress={() => setViewMode('grid1')}
-          >
-            <Ionicons name="square-outline" size={16} color={viewMode === 'grid1' ? '#ffffff' : '#71717a'} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.viewIconBtn, viewMode === 'grid2' && styles.viewIconBtnActive]}
-            onPress={() => setViewMode('grid2')}
-          >
-            <Ionicons name="grid-outline" size={16} color={viewMode === 'grid2' ? '#ffffff' : '#71717a'} />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.viewIconBtn, viewMode === 'list' && styles.viewIconBtnActive]}
-            onPress={() => setViewMode('list')}
-          >
-            <Ionicons name="list-outline" size={16} color={viewMode === 'list' ? '#ffffff' : '#71717a'} />
-          </TouchableOpacity>
-        </View>
+            Likes You ({likesYou.length})
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#f43f5e" />
-          <Text style={styles.loadingText}>Loading matches...</Text>
-        </View>
-      ) : matches.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="heart-dislike-outline" size={48} color="#f43f5e" />
-          <Text style={styles.emptyTitle}>No Matches Yet</Text>
-          <Text style={styles.emptyText}>
-            Keep discovering profiles! When someone likes you back, they will appear here.
-          </Text>
-          <TouchableOpacity style={styles.discoverBtn} onPress={() => router.push('/')}>
-            <Text style={styles.discoverBtnText}>Explore Profiles</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-        >
-          {viewMode === 'grid2' ? (
-            /* 2-COLUMN MATCHES GRID */
-            <View style={styles.grid2Container}>
-              {filteredMatches.map((match) => (
-                <TouchableOpacity
-                  key={match.id}
-                  activeOpacity={0.88}
-                  style={styles.grid2Card}
-                  onPress={() => openMatchProfile(match)}
-                >
-                  <Image source={{ uri: match.user.avatar }} style={styles.grid2Photo} resizeMode="cover" />
-
-                  {/* Card Top Action & Status Bar */}
-                  <View style={styles.cardTopHeader}>
-                    <View
-                      style={[
-                        styles.statusPill,
-                        match.user.online ? styles.statusPillOnline : styles.statusPillOffline,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.statusDot,
-                          match.user.online ? styles.statusDotOnline : styles.statusDotOffline,
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.statusPillText,
-                          match.user.online ? styles.statusPillTextOnline : styles.statusPillTextOffline,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {match.user.online ? 'Online' : 'Offline'}
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={styles.heartFloatBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleUnmatch(match.id, match.user.id);
-                      }}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <Ionicons name="heart" size={17} color="#f43f5e" />
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Bottom Overlay */}
-                  <View style={styles.cardBottomOverlay}>
-                    <View style={styles.nameRow}>
-                      <Text style={styles.grid2Name} numberOfLines={1}>
-                        {match.user.name}
-                      </Text>
-                      <Ionicons name="checkmark-circle" size={14} color="#fb7185" style={{ marginLeft: 3 }} />
-                    </View>
-
-                    <View style={styles.locationBadgeRow}>
-                      <Ionicons name="location-sharp" size={11} color="#f43f5e" />
-                      <Text style={styles.locationBadgeText} numberOfLines={1}>
-                        {matchCities[match.id] ||
-                          parseCityFromBio(match.user.bio) ||
-                          (match.user as any).location ||
-                          'Nearby'}
-                      </Text>
-                    </View>
-                  </View>
+      {/* Tab 1: Mutual Matches */}
+      {activeTab === 'matches' && (
+        <>
+          {/* Top Search & Filter Bar */}
+          <View style={styles.topControlBar}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={16} color="#71717a" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search matches..."
+                placeholderTextColor="#71717a"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Ionicons name="close-circle" size={16} color="#71717a" />
                 </TouchableOpacity>
-              ))}
+              )}
             </View>
-          ) : viewMode === 'grid1' ? (
-            /* 1-COLUMN BIG CARDS */
-            <View style={styles.grid1Container}>
-              {filteredMatches.map((match) => (
-                <TouchableOpacity
-                  key={match.id}
-                  activeOpacity={0.9}
-                  style={styles.grid1Card}
-                  onPress={() => openMatchProfile(match)}
+
+            <View style={styles.filterPillGroup}>
+              <TouchableOpacity
+                style={[styles.filterBtn, statusFilter === 'all' && styles.filterBtnActive]}
+                onPress={() => setStatusFilter('all')}
+              >
+                <Text
+                  style={[
+                    styles.filterBtnText,
+                    statusFilter === 'all' && styles.filterBtnTextActive,
+                  ]}
                 >
-                  <View style={styles.grid1PhotoContainer}>
-                    <Image source={{ uri: match.user.avatar }} style={styles.grid1Photo} resizeMode="cover" />
+                  All
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.filterBtn, statusFilter === 'online' && styles.filterBtnActive]}
+                onPress={() => setStatusFilter('online')}
+              >
+                <View style={styles.onlineDotIndicator} />
+                <Text
+                  style={[
+                    styles.filterBtnText,
+                    statusFilter === 'online' && styles.filterBtnTextActive,
+                  ]}
+                >
+                  {onlineCount}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-                    <View style={styles.cardTopHeader}>
-                      <View
-                        style={[
-                          styles.statusPill,
-                          match.user.online ? styles.statusPillOnline : styles.statusPillOffline,
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.statusDot,
-                            match.user.online ? styles.statusDotOnline : styles.statusDotOffline,
-                          ]}
-                        />
-                        <Text
-                          style={[
-                            styles.statusPillText,
-                            match.user.online ? styles.statusPillTextOnline : styles.statusPillTextOffline,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {match.user.online ? 'Online' : 'Offline'}
-                        </Text>
-                      </View>
+            <View style={styles.viewToggleGroup}>
+              <TouchableOpacity
+                style={[styles.viewIconBtn, viewMode === 'grid2' && styles.viewIconBtnActive]}
+                onPress={() => setViewMode('grid2')}
+              >
+                <Ionicons
+                  name="grid-outline"
+                  size={16}
+                  color={viewMode === 'grid2' ? '#ffffff' : '#71717a'}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.viewIconBtn, viewMode === 'list' && styles.viewIconBtnActive]}
+                onPress={() => setViewMode('list')}
+              >
+                <Ionicons
+                  name="list-outline"
+                  size={16}
+                  color={viewMode === 'list' ? '#ffffff' : '#71717a'}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-                      <TouchableOpacity
-                        style={styles.heartFloatBtn}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleUnmatch(match.id, match.user.id);
-                        }}
-                      >
-                        <Ionicons name="heart" size={20} color="#f43f5e" />
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.cardBottomOverlay}>
-                      <View style={styles.nameRow}>
-                        <Text style={styles.grid1Name}>{match.user.name}</Text>
-                        <Ionicons name="checkmark-circle" size={16} color="#fb7185" style={{ marginLeft: 4 }} />
-                      </View>
-
-                      <View style={styles.locationBadgeRow}>
-                        <Ionicons name="location-sharp" size={12} color="#f43f5e" />
-                        <Text style={styles.locationBadgeText}>
-                          {matchCities[match.id] ||
-                            parseCityFromBio(match.user.bio) ||
-                            (match.user as any).location ||
-                            'Nearby'}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
+          {loading ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#FF4B72" />
+              <Text style={styles.loadingText}>Loading matches...</Text>
+            </View>
+          ) : matches.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="heart-dislike-outline" size={48} color="#FF4B72" />
+              <Text style={styles.emptyTitle}>No Matches Yet</Text>
+              <Text style={styles.emptyText}>
+                Keep discovering profiles! When someone likes you back, they will appear here.
+              </Text>
+              <TouchableOpacity style={styles.discoverBtn} onPress={() => router.push('/')}>
+                <Text style={styles.discoverBtnText}>Explore Profiles</Text>
+              </TouchableOpacity>
             </View>
           ) : (
-            /* LIST / MESSAGES VIEW */
-            <View style={styles.chatList}>
-              {filteredMatches.map((match) => (
-                <TouchableOpacity
-                  key={match.id}
-                  style={styles.chatItem}
-                  onPress={() => router.push(`/chat/${match.id}` as any)}
-                >
-                  <View style={styles.avatarContainer}>
-                    <Image source={{ uri: match.user.avatar }} style={styles.chatAvatar} />
-                    {match.user.online && <View style={styles.onlineDotChat} />}
-                  </View>
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+            >
+              <View style={styles.grid2Container}>
+                {filteredMatches.map((match) => {
+                  const activity = formatUserActivity(
+                    match.user.id,
+                    match.user.lastActiveAt,
+                    match.user.online,
+                  );
+                  return (
+                    <TouchableOpacity
+                      key={match.id}
+                      activeOpacity={0.88}
+                      style={styles.grid2Card}
+                      onPress={() => router.push(`/chat/${match.id}` as any)}
+                    >
+                      <Image
+                        source={{ uri: match.user.avatar }}
+                        style={styles.grid2Photo}
+                        resizeMode="cover"
+                      />
 
-                  <View style={styles.chatInfo}>
-                    <View style={styles.chatTopRow}>
-                      <View style={styles.nameRow}>
-                        <Text style={styles.chatName}>{match.user.name}</Text>
-                        <Ionicons name="checkmark-circle" size={14} color="#fb7185" style={{ marginLeft: 3 }} />
+                      <View style={styles.cardTopHeader}>
+                        <View
+                          style={[
+                            styles.statusPill,
+                            activity.isOnline ? styles.statusPillOnline : styles.statusPillOffline,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.statusDot,
+                              activity.isOnline ? styles.statusDotOnline : styles.statusDotOffline,
+                            ]}
+                          />
+                          <Text
+                            style={[
+                              styles.statusPillText,
+                              activity.isOnline
+                                ? styles.statusPillTextOnline
+                                : styles.statusPillTextOffline,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {activity.statusText}
+                          </Text>
+                        </View>
+
+                        <TouchableOpacity
+                          style={styles.heartFloatBtn}
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            handleUnmatch(match.id, match.user.id);
+                          }}
+                        >
+                          <Ionicons name="heart" size={17} color="#FF4B72" />
+                        </TouchableOpacity>
                       </View>
-                      <Text
-                        style={[
-                          styles.chatTime,
-                          match.lastMessage.unread && styles.chatTimeUnread,
-                        ]}
-                      >
-                        {match.lastMessage.createdAt}
-                      </Text>
-                    </View>
 
-                    <View style={styles.chatBottomRow}>
-                      <Text
-                        style={[
-                          styles.chatMessage,
-                          match.lastMessage.unread && styles.chatMessageUnread,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {match.lastMessage.senderId === 'me' ? 'You: ' : ''}
-                        {match.lastMessage.text}
-                      </Text>
+                      <View style={styles.cardBottomOverlay}>
+                        <View style={styles.nameRow}>
+                          <Text style={styles.grid2Name} numberOfLines={1}>
+                            {match.user.name}
+                          </Text>
+                          {match.user.isVerified && (
+                            <Ionicons
+                              name="shield-checkmark"
+                              size={14}
+                              color="#38BDF8"
+                              style={{ marginLeft: 3 }}
+                            />
+                          )}
+                        </View>
+                        <Text style={styles.matchedDateText}>Matched {match.matchedAt}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+        </>
+      )}
+
+      {/* Tab 2: Likes You (VIP Gold Grid) */}
+      {activeTab === 'likes_you' && (
+        <ScrollView contentContainerStyle={styles.likesYouScroll}>
+          <View style={styles.vipBanner}>
+            <View style={styles.goldBadgeIcon}>
+              <Ionicons name="star" size={18} color="#F59E0B" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.vipTitle}>Gold Spotlight Admirers</Text>
+              <Text style={styles.vipSubtitle}>
+                People who liked your profile. Tap Match to unlock immediate chat!
+              </Text>
+            </View>
+          </View>
+
+          {likesYou.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="sparkles-outline" size={48} color="#F59E0B" />
+              <Text style={styles.emptyTitle}>No New Likes Yet</Text>
+              <Text style={styles.emptyText}>
+                Use Profile Boost or update your photos and prompts to get more likes!
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.grid2Container}>
+              {likesYou.map((admirer) => {
+                const photoUrl =
+                  admirer.user?.photos?.[0]?.url ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600';
+                return (
+                  <View key={admirer.swipeId} style={styles.goldCard}>
+                    <Image source={{ uri: photoUrl }} style={styles.goldPhoto} />
+                    <View style={styles.goldOverlay}>
+                      <View style={styles.nameRow}>
+                        <Text style={styles.goldName}>{admirer.user.name}</Text>
+                        {admirer.user.isVerified && (
+                          <Ionicons name="shield-checkmark" size={14} color="#38BDF8" />
+                        )}
+                      </View>
+
+                      {admirer.comment ? (
+                        <View style={styles.complimentPill}>
+                          <Text style={styles.complimentText}>💬 &ldquo;{admirer.comment}&rdquo;</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.goldBio} numberOfLines={1}>
+                          {admirer.user.bio || 'Liked your profile'}
+                        </Text>
+                      )}
 
                       <TouchableOpacity
-                        style={styles.unmatchBtn}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          handleUnmatch(match.id, match.user.id);
-                        }}
+                        style={styles.instantMatchBtn}
+                        onPress={() => handleInstantMatch(admirer)}
                       >
-                        <Ionicons name="heart" size={18} color="#f43f5e" />
+                        <Ionicons name="heart" size={16} color="#FFFFFF" />
+                        <Text style={styles.instantMatchText}>Match & Chat</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
-                </TouchableOpacity>
-              ))}
+                );
+              })}
             </View>
           )}
         </ScrollView>
-      )}
-
-      {/* Match Profile Detail Modal */}
-      {selectedMatch && (
-        <Modal animationType="slide" transparent={false} visible={true}>
-          <SafeAreaView style={styles.modalContainer}>
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setSelectedMatch(null)}
-            >
-              <Ionicons name="close" size={24} color="#ffffff" />
-            </TouchableOpacity>
-
-            <ScrollView contentContainerStyle={styles.modalScroll}>
-              <View style={styles.modalPhotoCarouselContainer}>
-                <Image
-                  source={{ uri: selectedMatch.user.avatar }}
-                  style={styles.modalHeroPhoto}
-                  resizeMode="cover"
-                />
-              </View>
-
-              <View style={styles.modalDetailsBody}>
-                <View style={styles.modalTitleRow}>
-                  <Text style={styles.modalName}>{selectedMatch.user.name}</Text>
-                  <TouchableOpacity
-                    style={styles.modalHeartBtn}
-                    onPress={() => handleUnmatch(selectedMatch.id, selectedMatch.user.id)}
-                  >
-                    <Ionicons name="heart" size={26} color="#f43f5e" />
-                  </TouchableOpacity>
-                </View>
-
-                <View
-                  style={[
-                    styles.statusPill,
-                    selectedMatch.user.online ? styles.statusPillOnline : styles.statusPillOffline,
-                    { alignSelf: 'flex-start', marginTop: 8 },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.statusDot,
-                      selectedMatch.user.online ? styles.statusDotOnline : styles.statusDotOffline,
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      styles.statusPillText,
-                      selectedMatch.user.online ? styles.statusPillTextOnline : styles.statusPillTextOffline,
-                    ]}
-                  >
-                    {selectedMatch.user.online ? 'Online' : 'Offline'}
-                  </Text>
-                </View>
-
-                {selectedMatch.user.bio ? (
-                  <View style={styles.modalSection}>
-                    <Text style={styles.sectionTitle}>About</Text>
-                    <Text style={styles.bioContentText}>{selectedMatch.user.bio}</Text>
-                  </View>
-                ) : null}
-              </View>
-            </ScrollView>
-
-            {/* Sticky Action Footer */}
-            <View style={styles.modalActionFooter}>
-              <TouchableOpacity
-                style={styles.modalMatchedBtn}
-                onPress={() => handleUnmatch(selectedMatch.id, selectedMatch.user.id)}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="heart" size={18} color="#f43f5e" />
-                <Text style={styles.modalMatchedBtnText}>Matched</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalChatNowBtn}
-                onPress={() => {
-                  const mId = selectedMatch.id;
-                  setSelectedMatch(null);
-                  router.push(`/chat/${mId}` as any);
-                }}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="chatbubble-ellipses" size={18} color="#ffffff" />
-                <Text style={styles.modalChatNowBtnText}>Chat Now</Text>
-              </TouchableOpacity>
-            </View>
-          </SafeAreaView>
-        </Modal>
       )}
     </SafeAreaView>
   );
@@ -576,458 +404,348 @@ export default function MatchesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b',
+    backgroundColor: '#090D16',
   },
-  centerContainer: {
+  tabSwitcher: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  tabBtn: {
     flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
-  loadingText: {
-    color: '#a1a1aa',
-    fontSize: 14,
-    marginTop: 12,
+  tabBtnActive: {
+    backgroundColor: 'rgba(255, 75, 114, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 75, 114, 0.4)',
+  },
+  tabBtnActiveGold: {
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  tabBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#71717A',
+  },
+  tabBtnTextActive: {
+    color: '#FF4B72',
+    fontWeight: '700',
+  },
+  tabBtnTextActiveGold: {
+    color: '#F59E0B',
+    fontWeight: '700',
   },
   topControlBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#18181b',
+    gap: 10,
   },
   searchBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#18181b',
-    borderRadius: 20,
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
     height: 38,
-    borderWidth: 1,
-    borderColor: '#27272a',
+    gap: 6,
   },
   searchIcon: {
-    marginRight: 6,
+    marginRight: 2,
   },
   searchInput: {
     flex: 1,
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 13,
   },
   filterPillGroup: {
     flexDirection: 'row',
-    backgroundColor: '#18181b',
-    borderRadius: 20,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: '#27272a',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    padding: 2,
   },
   filterBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 16,
+    paddingVertical: 6,
+    borderRadius: 10,
     gap: 4,
   },
   filterBtnActive: {
-    backgroundColor: '#27272a',
+    backgroundColor: '#FF4B72',
   },
   filterBtnText: {
     fontSize: 12,
+    color: '#71717A',
     fontWeight: '600',
-    color: '#71717a',
   },
   filterBtnTextActive: {
-    color: '#ffffff',
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   onlineDotIndicator: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#10b981',
+    backgroundColor: '#10B981',
   },
   viewToggleGroup: {
     flexDirection: 'row',
-    backgroundColor: '#18181b',
-    borderRadius: 20,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: '#27272a',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    padding: 2,
   },
   viewIconBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 16,
+    padding: 6,
+    borderRadius: 10,
   },
   viewIconBtnActive: {
-    backgroundColor: '#27272a',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  loadingText: {
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+  emptyContainer: {
+    paddingVertical: 60,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  discoverBtn: {
+    backgroundColor: '#FF4B72',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+    marginTop: 8,
+  },
+  discoverBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
   scrollContent: {
-    padding: 12,
-    paddingBottom: 30,
+    padding: 16,
+    paddingBottom: 40,
   },
   grid2Container: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 12,
   },
   grid2Card: {
-    width: '48.2%',
-    height: 240,
+    width: (SCREEN_WIDTH - 44) / 2,
+    height: 220,
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: '#18181b',
+    backgroundColor: '#1E293B',
     position: 'relative',
-    borderWidth: 1,
-    borderColor: '#27272a',
   },
   grid2Photo: {
     width: '100%',
     height: '100%',
   },
-  grid1Container: {
-    gap: 16,
-  },
-  grid1Card: {
-    width: '100%',
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  grid1PhotoContainer: {
-    width: '100%',
-    height: 380,
-    position: 'relative',
-  },
-  grid1Photo: {
-    width: '100%',
-    height: '100%',
-  },
-  grid1Name: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#ffffff',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
   cardTopHeader: {
     position: 'absolute',
-    top: 10,
-    left: 10,
-    right: 10,
+    top: 8,
+    left: 8,
+    right: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    zIndex: 10,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 3.5,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexShrink: 1,
+    paddingVertical: 4,
+    borderRadius: 10,
+    gap: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
   },
   statusPillOnline: {
-    backgroundColor: 'rgba(16, 185, 129, 0.25)',
-    borderColor: '#10b981',
+    borderColor: '#10B981',
+    borderWidth: 1,
   },
   statusPillOffline: {
-    backgroundColor: 'rgba(39, 39, 42, 0.85)',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   statusDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    marginRight: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   statusDotOnline: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#10B981',
   },
   statusDotOffline: {
-    backgroundColor: '#a1a1aa',
+    backgroundColor: '#94A3B8',
   },
   statusPillText: {
-    fontSize: 9.5,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '600',
   },
   statusPillTextOnline: {
-    color: '#ffffff',
+    color: '#10B981',
   },
   statusPillTextOffline: {
-    color: '#d4d4d8',
+    color: '#94A3B8',
   },
   heartFloatBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    flexShrink: 0,
   },
   cardBottomOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(9, 9, 11, 0.78)',
+    padding: 10,
+    backgroundColor: 'rgba(9, 13, 22, 0.85)',
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
   grid2Name: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ffffff',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  locationBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 3,
-  },
-  locationBadgeText: {
-    fontSize: 11,
-    color: '#e4e4e7',
-    fontWeight: '500',
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  chatList: {
-    gap: 10,
-  },
-  chatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: '#18181b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  avatarContainer: {
-    position: 'relative',
-  },
-  chatAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-  },
-  onlineDotChat: {
-    position: 'absolute',
-    bottom: 1,
-    right: 1,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
-    backgroundColor: '#10b981',
-    borderWidth: 2,
-    borderColor: '#18181b',
-  },
-  chatInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  chatTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  chatName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#ffffff',
+    color: '#FFFFFF',
   },
-  chatTime: {
+  matchedDateText: {
     fontSize: 11,
-    color: '#71717a',
+    color: '#94A3B8',
+    marginTop: 2,
   },
-  chatTimeUnread: {
-    color: '#f43f5e',
-    fontWeight: '600',
+  // Likes You VIP styles
+  likesYouScroll: {
+    padding: 16,
+    paddingBottom: 40,
+    gap: 16,
   },
-  chatBottomRow: {
+  vipBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    gap: 12,
   },
-  chatMessage: {
-    fontSize: 12,
-    color: '#a1a1aa',
-    flex: 1,
-    marginRight: 8,
-  },
-  chatMessageUnread: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  unmatchBtn: {
-    padding: 4,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 30,
-    marginTop: 60,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#ffffff',
-    marginTop: 12,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: '#a1a1aa',
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
-    marginBottom: 20,
-  },
-  discoverBtn: {
-    backgroundColor: '#f43f5e',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-  },
-  discoverBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#09090b',
-  },
-  modalCloseBtn: {
-    position: 'absolute',
-    top: 45,
-    right: 20,
-    zIndex: 20,
+  goldBadgeIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(245, 158, 11, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalScroll: {
-    paddingBottom: 90,
-  },
-  modalPhotoCarouselContainer: {
-    width: '100%',
-    height: 380,
-    backgroundColor: '#18181b',
-  },
-  modalHeroPhoto: {
-    width: SCREEN_WIDTH,
-    height: 380,
-  },
-  modalDetailsBody: {
-    padding: 24,
-  },
-  modalTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  modalName: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#ffffff',
-  },
-  modalHeartBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#18181b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  modalSection: {
-    marginTop: 20,
-  },
-  sectionTitle: {
-    fontSize: 13,
+  vipTitle: {
+    fontSize: 15,
     fontWeight: '700',
-    color: '#71717a',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
+    color: '#F59E0B',
   },
-  bioContentText: {
-    fontSize: 14,
-    color: '#d4d4d8',
-    lineHeight: 20,
+  vipSubtitle: {
+    fontSize: 12,
+    color: '#CBD5E1',
+    marginTop: 2,
+    lineHeight: 16,
   },
-  modalActionFooter: {
+  goldCard: {
+    width: (SCREEN_WIDTH - 44) / 2,
+    height: 240,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#1E293B',
+    position: 'relative',
+    borderWidth: 1.5,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
+  },
+  goldPhoto: {
+    width: '100%',
+    height: '100%',
+  },
+  goldOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(9, 9, 11, 0.95)',
-    borderTopWidth: 1,
-    borderTopColor: '#18181b',
+    padding: 10,
+    backgroundColor: 'rgba(9, 13, 22, 0.9)',
+    gap: 4,
   },
-  modalMatchedBtn: {
-    flex: 1,
+  goldName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  goldBio: {
+    fontSize: 11,
+    color: '#94A3B8',
+  },
+  complimentPill: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 2,
+  },
+  complimentText: {
+    fontSize: 10,
+    color: '#E9D5FF',
+    fontStyle: 'italic',
+  },
+  instantMatchBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(244, 63, 94, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(244, 63, 94, 0.4)',
-    paddingVertical: 14,
-    borderRadius: 20,
+    gap: 4,
+    backgroundColor: '#F59E0B',
+    paddingVertical: 7,
+    borderRadius: 10,
+    marginTop: 6,
   },
-  modalMatchedBtnText: {
-    color: '#f43f5e',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  modalChatNowBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#27272a',
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-    paddingVertical: 14,
-    borderRadius: 20,
-  },
-  modalChatNowBtnText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
+  instantMatchText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
   },
 });

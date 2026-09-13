@@ -21,6 +21,18 @@ export class StoriesService {
     return { mediaUrl: publicUrl, key };
   }
 
+  async uploadStoryBase64(userId: string, base64Data: string, contentType = 'image/jpeg') {
+    const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const { publicUrl, key } = await this.s3.uploadBuffer(
+      userId,
+      buffer,
+      contentType,
+      'stories',
+    );
+    return { mediaUrl: publicUrl, key };
+  }
+
   async getFeed(currentUserId: string) {
     const now = new Date();
 

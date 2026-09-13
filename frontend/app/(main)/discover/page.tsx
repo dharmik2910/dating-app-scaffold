@@ -1,51 +1,40 @@
 'use client';
 
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { getSocket } from '@/lib/socket';
 import { usePresenceStore, formatUserActivity } from '@/lib/usePresenceStore';
 import {
   IconMapPin,
-  IconUser,
   IconSparkles,
   IconHeart,
-  IconHeartFilled,
-  IconSquare,
-  IconLayoutGrid,
-  IconGridDots,
-  IconList,
   IconX,
-  IconChevronLeft,
-  IconChevronRight,
-  IconCompass,
-  IconCircleCheckFilled,
   IconMessageCircle2,
   IconSearch,
   IconFlame,
+  IconBolt,
+  IconStar,
+  IconEyeOff,
+  IconShieldCheck,
+  IconFlag,
+  IconBan,
+  IconChevronLeft,
+  IconChevronRight,
+  IconChevronDown,
+  IconMicrophone,
+  IconPlayerPlay,
+  IconPlayerPause,
+  IconVolume,
 } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import DiscoverSkeleton from '@/components/DiscoverSkeleton';
 import StoriesBar, { StoryUserGroup } from '@/components/stories/StoriesBar';
 import StoryViewerModal from '@/components/stories/StoryViewerModal';
 import StoryUploadModal from '@/components/stories/StoryUploadModal';
+import NotificationModal from '@/components/NotificationModal';
 
-type ViewMode = 'grid5' | 'grid3' | 'grid2' | 'grid1' | 'list';
-
-const PAGE_SIZE = 15;
-
-type Candidate = {
-  userId: string;
-  name: string;
-  bio?: string;
-  distance_km: number;
-  latitude?: number;
-  longitude?: number;
-  liked?: boolean;
-  photos?: { id: string; url: string }[];
-  lastActiveAt?: string | Date;
-};
+type DiscoveryMode = 'all' | 'top_picks' | 'blind_date';
 
 const INTEREST_LABELS: Record<string, string> = {
   coffee: '☕ Coffee',
@@ -61,60 +50,68 @@ const INTEREST_LABELS: Record<string, string> = {
   movies: '🎬 Movies',
   tech: '💻 Tech',
   hiking: '🧗‍♂️ Outdoor',
+  outdoor: '🧗‍♂️ Outdoor',
   wine: '🍷 Wine',
+  cooking: '🍳 Cooking',
+  nature: '🌿 Nature',
+  sports: '⚽ Sports',
+  dance: '💃 Dance',
+  yoga: '🧘 Yoga',
 };
 
 function parseBioContent(rawBio?: string) {
-  if (!rawBio) return { cleanBio: '', interests: [] as string[], city: '' };
+  if (!rawBio) return { cleanBio: '', interests: [] as string[], city: '', intent: '' };
   let cleanBio = rawBio;
   let city = '';
+  let intent = '';
   let interests: string[] = [];
 
-  const cityMatch = cleanBio.match(/\[CITY:(.*?)\]/);
+  const cityMatch = cleanBio.match(/\[CITY:\s*([^\]]*?)\]/i);
   if (cityMatch && cityMatch[1]) {
     city = cityMatch[1].trim();
-    cleanBio = cleanBio.replace(/\[CITY:.*?\]/, '');
   }
+  cleanBio = cleanBio.replace(/\[CITY:[^\]]*\]?/gi, '');
 
-  const intMatch = cleanBio.match(/\[INTERESTS:(.*?)\]/);
+  const intentMatch = cleanBio.match(/\[INTENT:\s*([^\]]*?)\]/i);
+  if (intentMatch && intentMatch[1]) {
+    intent = intentMatch[1].trim();
+  }
+  cleanBio = cleanBio.replace(/\[INTENT:[^\]]*\]?/gi, '');
+
+  const intMatch = cleanBio.match(/\[INTERESTS:\s*([^\]]*?)\]/i);
   if (intMatch && intMatch[1]) {
     interests = intMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
-    cleanBio = cleanBio.replace(/\[INTERESTS:.*?\]/, '');
   }
+  cleanBio = cleanBio.replace(/\[INTERESTS:[^\]]*\]?/gi, '');
 
-  return { cleanBio: cleanBio.trim(), interests, city };
+  // Strip any remaining bracketed or unclosed tags
+  cleanBio = cleanBio.replace(/\[[A-Za-z0-9_-]+:[^\]]*\]?/gi, '');
+  cleanBio = cleanBio.replace(/\[[A-Za-z0-9_-]+\]?/gi, '');
+
+  return { cleanBio: cleanBio.trim(), interests, city, intent };
 }
 
-const CITY_CACHE_STORAGE_KEY = 'ember_city_lookup_cache';
-
-function getInitialCityCache(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const stored = localStorage.getItem(CITY_CACHE_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
+function formatIntent(intentStr?: string) {
+  if (!intentStr) return null;
+  const lower = intentStr.toLowerCase();
+  if (lower.includes('long-term') || lower.includes('relationship')) return `💞 ${intentStr}`;
+  if (lower.includes('dating') || lower.includes('seeing where')) return `🥂 ${intentStr}`;
+  if (lower.includes('casual') || lower.includes('fun')) return `✨ ${intentStr}`;
+  if (lower.includes('friend')) return `🤝 ${intentStr}`;
+  return `💫 ${intentStr}`;
 }
 
-let cityLookupCache: Record<string, string> = getInitialCityCache();
-
-function saveCityCache(key: string, label: string) {
-  cityLookupCache[key] = label;
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(CITY_CACHE_STORAGE_KEY, JSON.stringify(cityLookupCache));
-    } catch {}
+function calculateAge(birthDateStr?: string) {
+  if (!birthDateStr) return null;
+  const birthDate = new Date(birthDateStr);
+  if (isNaN(birthDate.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
   }
-}
-
-function preloadImages(urls: (string | undefined)[]) {
-  if (typeof window === 'undefined') return;
-  urls.forEach((url) => {
-    if (!url) return;
-    const img = new Image();
-    img.src = url;
-  });
+  return age > 0 && age < 120 ? age : null;
 }
 
 export default function DiscoverPage() {
@@ -123,1071 +120,918 @@ export default function DiscoverPage() {
   const lastActiveMap = usePresenceStore((state) => state.lastActiveMap);
   const setPresenceList = usePresenceStore((state) => state.setPresenceList);
 
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [candidateCities, setCandidateCities] = useState<Record<string, string>>({});
-  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState<string>('');
-  const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [candidates, setCandidates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<ViewMode>('grid5');
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
-  const [currentPhotoIndex, setCurrentPhotoIndex] = useState<number>(0);
-  const [modalImgLoading, setModalImgLoading] = useState<boolean>(true);
-  const [cardPhotoIndexes, setCardPhotoIndexes] = useState<Record<string, number>>({});
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
-  const [startingChat, setStartingChat] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'online'>('all');
+  const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>('all');
 
-  const observerTarget = useRef<HTMLDivElement | null>(null);
+  // Candidate Modal
+  const [selectedCandidate, setSelectedCandidate] = useState<any | null>(null);
+  const [selectedPhotoIdx, setSelectedPhotoIdx] = useState(0);
 
-  // Stories feature states
+  // VIP & Compliments & Quota
+  const [isBoosted, setIsBoosted] = useState(false);
+  const [swipeQuota, setSwipeQuota] = useState<{ remaining: number; isUnlimited: boolean; totalAllowed: number } | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showComplimentModal, setShowComplimentModal] = useState(false);
+  const [complimentText, setComplimentText] = useState('');
+  const [sendingCompliment, setSendingCompliment] = useState(false);
+
+  // Voice Bio Audio Playback
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Interactive Two Truths
+  const [guessedLieIdx, setGuessedLieIdx] = useState<number | null>(null);
+
+  // Stories
   const [storyGroups, setStoryGroups] = useState<StoryUserGroup[]>([]);
-  const [storiesLoading, setStoriesLoading] = useState<boolean>(true);
-  const [activeStoryUserIdx, setActiveStoryUserIdx] = useState<number | null>(null);
-  const [isUploadStoryOpen, setIsUploadStoryOpen] = useState<boolean>(false);
+  const [activeStoryIdx, setActiveStoryIdx] = useState<number | null>(null);
+  const [isUploadStoryOpen, setIsUploadStoryOpen] = useState(false);
 
-  // Synchronously resolve known cities from bio or localStorage cache
-  function getCachedCitiesSync(items: Candidate[]): Record<string, string> {
-    const resolved: Record<string, string> = {};
-    for (const c of items) {
-      const { city } = parseBioContent(c.bio);
-      if (city) {
-        resolved[c.userId] = city;
-      } else if (c.latitude != null && c.longitude != null) {
-        const key = `${c.latitude.toFixed(3)},${c.longitude.toFixed(3)}`;
-        if (cityLookupCache[key]) {
-          resolved[c.userId] = cityLookupCache[key];
-        }
-      }
+  // Safety Modals
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('harassment');
+  const [reportDetails, setReportDetails] = useState('');
+  const [submittingReport, setSubmittingReport] = useState(false);
+
+  const fetchQuota = useCallback(async () => {
+    try {
+      const res = await api.getSwipeQuota();
+      setSwipeQuota(res);
+    } catch (e) {
+      console.warn('Fetch swipe quota error:', e);
     }
-    return resolved;
-  }
-
-  // Debounce search query input (250ms)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery.trim());
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  async function resolveCitiesForCandidates(items: Candidate[]) {
-    const toLookup = items.filter((c) => {
-      const { city } = parseBioContent(c.bio);
-      if (city) return false;
-      if (c.latitude == null || c.longitude == null) return false;
-      const key = `${c.latitude.toFixed(3)},${c.longitude.toFixed(3)}`;
-      return !cityLookupCache[key];
-    });
-
-    if (toLookup.length === 0) return;
-
-    // Fetch all uncached cities in parallel
-    await Promise.all(
-      toLookup.map(async (c) => {
-        const key = `${c.latitude!.toFixed(3)},${c.longitude!.toFixed(3)}`;
-        try {
-          const res = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${c.latitude}&longitude=${c.longitude}&localityLanguage=en`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const city = data.city || data.locality || data.principalSubdivision;
-            const country = data.countryName || data.countryCode;
-            const label = city ? (country ? `${city}, ${country}` : city) : '';
-            if (label) {
-              saveCityCache(key, label);
-              setCandidateCities((prev) => ({ ...prev, [c.userId]: label }));
-            }
-          }
-        } catch (err) {
-          console.warn('Async city lookup error:', err);
-        }
-      })
-    );
-  }
-
-  useEffect(() => {
-    fetchCandidates(debouncedSearchQuery);
-  }, [debouncedSearchQuery]);
-
-  useEffect(() => {
-    fetchStories();
-
-    const socket = getSocket();
-    const handleStoryEvent = () => {
-      fetchStories();
-    };
-
-    const handleConnect = () => {
-      if (candidates.length > 0) {
-        queryCandidatesPresence(candidates);
-      }
-    };
-
-    const handleUserStatus = (data: { userId: string; isOnline: boolean; lastActiveAt?: string }) => {
-      usePresenceStore.getState().setUserStatus(data.userId, data.isOnline, data.lastActiveAt);
-    };
-
-    socket.on('storyCreated', handleStoryEvent);
-    socket.on('storyDeleted', handleStoryEvent);
-    socket.on('storyViewed', handleStoryEvent);
-    socket.on('connect', handleConnect);
-    socket.on('userStatusChanged', handleUserStatus);
-
-    return () => {
-      socket.off('storyCreated', handleStoryEvent);
-      socket.off('storyDeleted', handleStoryEvent);
-      socket.off('storyViewed', handleStoryEvent);
-      socket.off('connect', handleConnect);
-      socket.off('userStatusChanged', handleUserStatus);
-    };
   }, []);
 
-  function fetchStories() {
-    setStoriesLoading(true);
-    api
-      .getStoriesFeed()
-      .then((data) => {
-        setStoryGroups(Array.isArray(data) ? data : []);
-      })
-      .catch((err) => {
-        console.error('Failed to load stories feed:', err);
-      })
-      .finally(() => {
-        setStoriesLoading(false);
-      });
-  }
-
-  // Preload and monitor modal photo loading state
-  useEffect(() => {
-    if (selectedCandidate) {
-      const photosList = selectedCandidate.photos || [];
-      const currentPhotoUrl = photosList[Math.min(currentPhotoIndex, photosList.length - 1)]?.url;
-      if (currentPhotoUrl) {
-        const img = new Image();
-        img.src = currentPhotoUrl;
-        if (img.complete) {
-          setModalImgLoading(false);
-        } else {
-          setModalImgLoading(true);
-          img.onload = () => setModalImgLoading(false);
-          img.onerror = () => setModalImgLoading(false);
-        }
-        preloadImages(photosList.map((p) => p.url));
-      } else {
-        setModalImgLoading(false);
-      }
-    }
-  }, [selectedCandidate, currentPhotoIndex]);
-
-  function queryCandidatesPresence(candidateList: Candidate[]) {
-    const userIds = candidateList.map((c) => c.userId).filter(Boolean);
-    if (userIds.length > 0) {
-      const socket = getSocket();
-      socket.emit('queryPresence', userIds, (response: any[]) => {
-        if (Array.isArray(response)) {
-          setPresenceList(response);
-        }
-      });
-    }
-  }
-
-  function fetchCandidates(queryText?: string) {
-    setHasScrolled(false);
-    const isSearchTrigger = Boolean(queryText);
-    if (isSearchTrigger) {
-      setIsSearching(true);
+  const toggleVoiceBio = (candidateId: string, url?: string) => {
+    if (!url) return;
+    if (playingVoiceId === candidateId) {
+      voiceAudioRef.current?.pause();
+      setPlayingVoiceId(null);
     } else {
-      setLoading(true);
-    }
-
-    api
-      .getDiscovery(undefined, PAGE_SIZE, queryText)
-      .then((data) => {
-        const items = Array.isArray(data) ? data : data.items || [];
-        const initialCities = getCachedCitiesSync(items);
-        setCandidateCities((prev) => ({ ...prev, ...initialCities }));
-        setCandidates(items);
-        setNextCursor(data.nextCursor || null);
-        setHasMore(Boolean(data.hasMore));
-
-        const photoUrls = items.flatMap((c: Candidate) => (c.photos || []).map((p: any) => p.url)).filter(Boolean);
-        preloadImages(photoUrls);
-
-        queryCandidatesPresence(items);
-        resolveCitiesForCandidates(items);
-      })
-      .catch((err) => {
-        console.error(err);
-      })
-      .finally(() => {
-        setLoading(false);
-        setIsSearching(false);
-      });
-  }
-
-  const loadMoreCandidates = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const data = await api.getDiscovery(nextCursor, PAGE_SIZE, debouncedSearchQuery || undefined);
-      const items = Array.isArray(data) ? data : data.items || [];
-      const initialCities = getCachedCitiesSync(items);
-      setCandidateCities((prev) => ({ ...prev, ...initialCities }));
-      setCandidates((prev) => [...prev, ...items]);
-      setNextCursor(data.nextCursor || null);
-      setHasMore(Boolean(data.hasMore));
-
-      const photoUrls = items.flatMap((c: Candidate) => (c.photos || []).map((p: any) => p.url)).filter(Boolean);
-      preloadImages(photoUrls);
-
-      queryCandidatesPresence(items);
-      resolveCitiesForCandidates(items);
-    } catch (err) {
-      console.error('Failed to load more candidates:', err);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [nextCursor, loadingMore, debouncedSearchQuery]);
-
-  const [hasScrolled, setHasScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => {
-      if (window.scrollY > 30) {
-        setHasScrolled(true);
+      if (!voiceAudioRef.current) {
+        voiceAudioRef.current = new Audio(url);
+      } else {
+        voiceAudioRef.current.src = url;
       }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+      voiceAudioRef.current.play();
+      voiceAudioRef.current.onended = () => setPlayingVoiceId(null);
+      setPlayingVoiceId(candidateId);
+    }
+  };
+
+  const fetchCandidates = useCallback(async () => {
+    setLoading(true);
+    try {
+      let data: any;
+      if (discoveryMode === 'top_picks') {
+        data = await api.getTopPicks();
+      } else if (discoveryMode === 'blind_date') {
+        data = await api.getBlindDateQueue();
+      } else {
+        data = await api.getDiscovery();
+      }
+
+      const items = Array.isArray(data) ? data : data?.items || [];
+      setCandidates(items);
+    } catch (e) {
+      console.warn('Discovery fetch error:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [discoveryMode]);
+
+  const fetchStories = useCallback(async () => {
+    try {
+      const data = await api.getStoriesFeed();
+      setStoryGroups(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('Stories error:', e);
+    }
   }, []);
 
-  // Automatic infinite scroll only when user actively scrolls near bottom
   useEffect(() => {
-    const target = observerTarget.current;
-    if (!target) return;
+    fetchCandidates();
+    fetchStories();
+    fetchQuota();
+  }, [fetchCandidates, fetchStories, fetchQuota]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading && hasScrolled) {
-          loadMoreCandidates();
-        }
-      },
-      {
-        rootMargin: '100px',
-        threshold: 0.1,
-      }
-    );
 
-    observer.observe(target);
-    return () => {
-      observer.disconnect();
-    };
-  }, [hasMore, loadingMore, loading, hasScrolled, loadMoreCandidates]);
 
-  async function handleToggleLike(candidate: Candidate) {
-    const isCurrentlyLiked = !!candidate.liked;
-    const nextLikedState = !isCurrentlyLiked;
-
-    setCandidates((prev) =>
-      prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: nextLikedState } : c))
-    );
-    if (selectedCandidate?.userId === candidate.userId) {
-      setSelectedCandidate((prev) => (prev ? { ...prev, liked: nextLikedState } : null));
-    }
-
+  // Boost Profile
+  const handleBoost = async () => {
     try {
-      if (nextLikedState) {
-        await api.swipe(candidate.userId, 'LIKE');
-        toast.success(`Matched with ${candidate.name}! ❤️`, {
-          description: 'You can now chat anytime in Matches',
-          action: {
-            label: 'Open Chat',
-            onClick: () => handleStartChat(candidate),
-          },
-        });
-      } else {
-        await api.swipe(candidate.userId, 'UNLIKE');
-        toast.info(`Match removed for ${candidate.name}`);
-      }
-    } catch (err) {
-      console.error(err);
-      setCandidates((prev) =>
-        prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: isCurrentlyLiked } : c))
-      );
-      if (selectedCandidate?.userId === candidate.userId) {
-        setSelectedCandidate((prev) => (prev ? { ...prev, liked: isCurrentlyLiked } : null));
-      }
-      toast.error('Failed to update match status. Please try again.');
+      await api.boostProfile(30);
+      setIsBoosted(true);
+      toast.success('🚀 Profile Spotlight Boosted for 30 minutes!');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not boost profile');
     }
-  }
+  };
 
-  async function handleStartChat(candidate: Candidate) {
-    setStartingChat(true);
-    try {
-      const res = await api.swipe(candidate.userId, 'LIKE');
-      setCandidates((prev) =>
-        prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: true } : c))
-      );
-      if (selectedCandidate?.userId === candidate.userId) {
-        setSelectedCandidate((prev) => (prev ? { ...prev, liked: true } : null));
-      }
-
-      if (res?.match?.id) {
-        router.push(`/chat/${res.match.id}`);
-      } else {
-        router.push('/chat');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to start chat. Redirecting to Chat...');
-      router.push('/chat');
-    } finally {
-      setStartingChat(false);
+  // Like Swipe (Once done, not more)
+  // Candidate Modal Opener (Locked when swipes are finished)
+  const handleOpenCandidate = (candidate: any) => {
+    if (swipeQuota && !swipeQuota.isUnlimited && swipeQuota.remaining <= 0) {
+      toast.error('🔒 Daily Swipes Finished (0/10). Cards are locked until tomorrow!');
+      return;
     }
-  }
-
-  function openCandidateModal(candidate: Candidate) {
-    const initialIndex = cardPhotoIndexes[candidate.userId] || 0;
-    setCurrentPhotoIndex(initialIndex);
+    setSelectedPhotoIdx(0);
+    setGuessedLieIdx(null);
     setSelectedCandidate(candidate);
+  };
 
-    if (candidate.photos && candidate.photos.length > 0) {
-      preloadImages(candidate.photos.map((p) => p.url));
-    }
-  }
+  // Like / Unlike Swipe (Retains card in deck)
+  const handleToggleLike = async (candidate: any) => {
+    const isCurrentlyLiked = Boolean(candidate.liked);
 
-  function cycleCardPhoto(userId: string, totalPhotos: number, direction: 'next' | 'prev', e?: React.MouseEvent) {
-    if (e) e.stopPropagation();
-    setCardPhotoIndexes((prev) => {
-      const current = prev[userId] || 0;
-      const nextIdx =
-        direction === 'next'
-          ? (current + 1) % totalPhotos
-          : (current - 1 + totalPhotos) % totalPhotos;
-      return { ...prev, [userId]: nextIdx };
-    });
-  }
+    if (!isCurrentlyLiked) {
+      if (swipeQuota && !swipeQuota.isUnlimited && swipeQuota.remaining <= 0) {
+        toast.error('You have used all 10 free swipes for today! Come back tomorrow.');
+        return;
+      }
 
-  function handleTouchEnd(e: React.TouchEvent, onNext: () => void, onPrev: () => void) {
-    if (touchStartX === null) return;
-    const diffX = touchStartX - e.changedTouches[0].clientX;
-    if (Math.abs(diffX) > 35) {
-      if (diffX > 0) {
-        onNext();
-      } else {
-        onPrev();
+      const nextRemaining = swipeQuota?.isUnlimited
+        ? 9999
+        : Math.max(0, (swipeQuota?.remaining ?? 10) - 1);
+
+      setSwipeQuota((prev: any) =>
+        prev
+          ? { ...prev, remaining: nextRemaining }
+          : { remaining: nextRemaining, totalAllowed: 10, isUnlimited: false },
+      );
+
+      // Keep candidate in deck, mark as liked
+      setCandidates((prev) =>
+        prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: true } : c)),
+      );
+
+      if (selectedCandidate && selectedCandidate.userId === candidate.userId) {
+        setSelectedCandidate((prev: any) => (prev ? { ...prev, liked: true } : null));
+      }
+
+      try {
+        const res = await api.swipe(candidate.userId, 'LIKE');
+        if (res?.quota) {
+          setSwipeQuota(res.quota);
+        } else {
+          fetchQuota();
+        }
+        if (res?.matched) {
+          toast.success(`🎉 It's a Match with ${candidate.name}!`);
+        } else if (nextRemaining <= 0 && !swipeQuota?.isUnlimited) {
+          setSelectedCandidate(null);
+          toast.info(`Liked ${candidate.name}! ❤️ You used all 10 daily swipes. Cards are locked until tomorrow.`);
+        } else {
+          toast.success(`Liked ${candidate.name}! ❤️`);
+        }
+      } catch (e: any) {
+        toast.error(e.message || 'Swipe failed');
+        fetchQuota();
+      }
+    } else {
+      // UNLIKE action
+      setCandidates((prev) =>
+        prev.map((c) => (c.userId === candidate.userId ? { ...c, liked: false } : c)),
+      );
+
+      if (selectedCandidate && selectedCandidate.userId === candidate.userId) {
+        setSelectedCandidate((prev: any) => (prev ? { ...prev, liked: false } : null));
+      }
+
+      try {
+        const res = await api.swipe(candidate.userId, 'UNLIKE');
+        if (res?.quota) {
+          setSwipeQuota(res.quota);
+        } else {
+          fetchQuota();
+        }
+        toast.info(`Unliked ${candidate.name}`);
+      } catch (e: any) {
+        toast.error(e.message || 'Failed to unlike');
+        fetchQuota();
       }
     }
-    setTouchStartX(null);
-  }
+  };
 
-  const { onlineCandidates, offlineCandidates, onlineCount, offlineCount } = useMemo(() => {
-    const online: Candidate[] = [];
-    const offline: Candidate[] = [];
-
-    candidates.forEach((c) => {
-      if (onlineUserIds.includes(c.userId)) {
-        online.push(c);
+  // Pass Candidate
+  const handleSwipePass = async (candidate: any) => {
+    if (selectedCandidate && selectedCandidate.userId === candidate.userId) {
+      setSelectedCandidate(null);
+    }
+    try {
+      const res = await api.swipe(candidate.userId, 'PASS');
+      if (res?.quota) {
+        setSwipeQuota(res.quota);
       } else {
-        offline.push(c);
+        fetchQuota();
       }
-    });
+    } catch (e: any) {
+      console.warn('Swipe pass error:', e);
+      fetchQuota();
+    }
+  };
 
-    return {
-      onlineCandidates: online,
-      offlineCandidates: offline,
-      onlineCount: online.length,
-      offlineCount: offline.length,
+  // Keyboard shortcut for Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showComplimentModal) setShowComplimentModal(false);
+        else if (showReportModal) setShowReportModal(false);
+        else if (selectedCandidate) setSelectedCandidate(null);
+      }
     };
-  }, [candidates, onlineUserIds]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCandidate, showComplimentModal, showReportModal]);
 
-  const displayedCandidates = useMemo(() => {
-    if (statusFilter === 'online') return onlineCandidates;
-    if (statusFilter === 'offline') return offlineCandidates;
-    return candidates;
-  }, [statusFilter, candidates, onlineCandidates, offlineCandidates]);
+  // Send Compliment
+  const handleSendCompliment = async () => {
+    if (!complimentText.trim() || !selectedCandidate) return;
+    setSendingCompliment(true);
+    const candidateName = selectedCandidate.name;
+    const candidateId = selectedCandidate.userId;
+
+    const nextRemaining = swipeQuota?.isUnlimited ? 9999 : Math.max(0, (swipeQuota?.remaining ?? 10) - 1);
+    setSwipeQuota((prev: any) =>
+      prev
+        ? { ...prev, remaining: nextRemaining }
+        : { remaining: nextRemaining, totalAllowed: 10, isUnlimited: false },
+    );
+
+    // Keep candidate in deck, mark as liked
+    setCandidates((prev) =>
+      prev.map((c) => (c.userId === candidateId ? { ...c, liked: true } : c)),
+    );
+
+    if (nextRemaining <= 0 && !swipeQuota?.isUnlimited) {
+      setSelectedCandidate(null);
+    } else {
+      setSelectedCandidate((prev: any) => (prev ? { ...prev, liked: true } : null));
+    }
+
+    try {
+      const res = await api.sendCompliment(candidateId, complimentText.trim(), 'profile');
+      setShowComplimentModal(false);
+      setComplimentText('');
+      if (res?.quota) {
+        setSwipeQuota(res.quota);
+      } else {
+        fetchQuota();
+      }
+      if (nextRemaining <= 0 && !swipeQuota?.isUnlimited) {
+        toast.info(`Sent compliment with Super Like to ${candidateName}! 💌 All 10 swipes used. Cards are locked until tomorrow.`);
+      } else {
+        toast.success(`Sent compliment with Super Like to ${candidateName}! 💌`);
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Could not send compliment');
+      fetchQuota();
+    } finally {
+      setSendingCompliment(false);
+    }
+  };
+
+  // Block User
+  const handleBlockUser = async () => {
+    if (!selectedCandidate) return;
+    if (!confirm(`Block ${selectedCandidate.name}? You will no longer see each other.`)) return;
+    try {
+      await api.blockUser(selectedCandidate.userId);
+      setCandidates((prev) => prev.filter((c) => c.userId !== selectedCandidate.userId));
+      setSelectedCandidate(null);
+      toast.success(`${selectedCandidate.name} has been blocked.`);
+    } catch (e: any) {
+      toast.error(e.message || 'Could not block user');
+    }
+  };
+
+  // Submit Report
+  const handleReportSubmit = async () => {
+    if (!selectedCandidate) return;
+    setSubmittingReport(true);
+    try {
+      const reportedUserId = selectedCandidate.userId;
+      const reportedName = selectedCandidate.name;
+      await api.reportUser(reportedUserId, reportReason, reportDetails);
+      setShowReportModal(false);
+      setSelectedCandidate(null);
+      setCandidates((prev) => prev.filter((c) => c.userId !== reportedUserId));
+      setReportDetails('');
+      toast.success(`Report for ${reportedName} submitted to moderation. Thank you.`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to report user');
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
+
+  const filteredCandidates = useMemo(() => {
+    return candidates.filter((c) => {
+      const activity = formatUserActivity(c.userId, c.updatedAt, onlineUserIds, lastActiveMap);
+      if (statusFilter === 'online' && !activity.isOnline) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return c.name?.toLowerCase().includes(q) || c.bio?.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [candidates, statusFilter, searchQuery, onlineUserIds, lastActiveMap]);
 
   return (
-    <main className="w-full px-4 sm:px-8 py-6 min-h-[calc(100vh-4rem)] flex flex-col relative">
-      {/* Discovery Toolbar */}
-      <div className="flex items-center justify-between gap-2.5 sm:gap-4 mb-5">
-        {/* Production Search Bar */}
-        <div className="relative flex-1 min-w-0 max-w-xs sm:max-w-sm md:max-w-md">
-          <IconSearch
-            size={15}
-            className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none transition-colors"
-          />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search profiles..."
-            aria-label="Search profiles"
-            className="w-full bg-neutral-900/90 hover:bg-neutral-900 border border-neutral-800 focus:border-rose-500/60 text-white placeholder-neutral-500 text-xs font-medium pl-8 sm:pl-9 pr-6 sm:pr-8 py-2 sm:py-2.5 rounded-2xl outline-none transition-all shadow-inner focus:ring-2 focus:ring-rose-500/20"
-          />
-          {isSearching ? (
-            <div className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-rose-500/30 border-t-rose-500 rounded-full animate-spin pointer-events-none" />
-          ) : searchQuery ? (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
-              title="Clear search"
-            >
-              <IconX size={12} />
-            </button>
-          ) : null}
-        </div>
-
-        {/* Toolbar Controls Right Side */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 flex-nowrap">
-
-          {/* Status Filter Pill Selector */}
-          <div className="flex items-center p-0.5 sm:p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">
-            <button
-              type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'all'
-                ? 'bg-neutral-800 text-white shadow-sm font-semibold'
-                : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-            >
-              <span className="hidden sm:inline">All ({candidates.length})</span>
-              <span className="sm:hidden">All</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('online')}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${statusFilter === 'online'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm font-semibold'
-                : 'text-neutral-400 hover:text-emerald-400'
-                }`}
-            >
-              <span className="relative flex h-1.5 w-1.5 sm:h-2 sm:w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 sm:h-2 sm:w-2 bg-emerald-500"></span>
-              </span>
-              <span className="hidden sm:inline">Online ({onlineCount})</span>
-              <span className="sm:hidden font-semibold">{onlineCount}</span>
-            </button>
-          </div>
-
-          {/* View Mode Switcher (Visible on mobile & desktop) */}
-          <div className="flex items-center p-0.5 sm:p-1 bg-neutral-900/90 border border-neutral-800 rounded-2xl shrink-0">
-            {/* Dense 5-Col Grid Option (Desktop only) */}
-            <button
-              type="button"
-              onClick={() => setViewMode('grid5')}
-              title="Expanded Grid (5 columns)"
-              className={`hidden md:block p-1.5 rounded-xl transition-all ${viewMode === 'grid5' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-            >
-              <IconGridDots size={16} />
-            </button>
-            {/* Full Card View Option (Mobile only) */}
-            <button
-              type="button"
-              onClick={() => setViewMode('grid1')}
-              title="Full Card View"
-              className={`md:hidden p-1.5 rounded-xl transition-all ${viewMode === 'grid1' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-            >
-              <IconSquare size={15} />
-            </button>
-            {/* Standard Grid Option */}
-            <button
-              type="button"
-              onClick={() => setViewMode('grid3')}
-              title="Standard Grid"
-              className={`p-1.5 rounded-xl transition-all ${viewMode === 'grid3' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-            >
-              <IconLayoutGrid size={15} />
-            </button>
-            {/* List View Option */}
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              title="List View"
-              className={`p-1.5 rounded-xl transition-all ${viewMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-            >
-              <IconList size={15} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Stories Tray */}
+    <div className="w-full px-4 sm:px-8 xl:px-12 py-6 space-y-6 max-w-none">
+      {/* Stories Bar */}
       <StoriesBar
         groups={storyGroups}
-        loading={storiesLoading}
-        onOpenViewer={(idx) => setActiveStoryUserIdx(idx)}
+        onOpenViewer={(idx) => setActiveStoryIdx(idx)}
         onOpenUpload={() => setIsUploadStoryOpen(true)}
       />
 
-      {/* Main Discover Grid / List Feed */}
-      {loading ? (
-        <DiscoverSkeleton viewMode={viewMode} />
-      ) : displayedCandidates.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center py-20">
-          <div className="text-center p-8 bg-neutral-900/60 border border-neutral-800/80 rounded-3xl max-w-sm backdrop-blur-md">
-            {debouncedSearchQuery ? (
-              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto mb-3 border border-rose-500/20">
-                <IconSearch size={24} />
-              </div>
-            ) : (
-              <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto mb-3 border border-amber-500/20">
-                <IconSparkles size={24} />
-              </div>
-            )}
-            <h3 className="text-base font-bold text-white">
-              {debouncedSearchQuery
-                ? `No results for "${debouncedSearchQuery}"`
-                : statusFilter === 'online'
-                  ? 'No Online Users Right Now'
-                  : statusFilter === 'offline'
-                    ? 'No Offline Users'
-                    : 'No Profiles Found'}
-            </h3>
-            <p className="text-neutral-400 text-xs mt-1.5 leading-relaxed">
-              {debouncedSearchQuery
-                ? 'Try checking for typos or searching by a different name, hobby, or keyword.'
-                : statusFilter !== 'all'
-                  ? `There are no users currently ${statusFilter}. Try switching back to All.`
-                  : 'No profiles available right now. Check back later or refresh feed.'}
-            </p>
-            {debouncedSearchQuery ? (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="mt-4 px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:opacity-90 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-rose-950/40 cursor-pointer"
-              >
-                Clear Search
-              </button>
-            ) : statusFilter !== 'all' ? (
-              <button
-                onClick={() => setStatusFilter('all')}
-                className="mt-4 px-4 py-2 bg-gradient-to-r from-rose-600 to-amber-600 hover:opacity-90 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-rose-950/40 cursor-pointer"
-              >
-                Show All Users ({candidates.length})
-              </button>
-            ) : (
-              <button
-                onClick={() => fetchCandidates()}
-                className="mt-4 px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-xl transition-colors cursor-pointer"
-              >
-                Refresh Feed
-              </button>
-            )}
+      {/* Search, Status Filters & VIP Actions */}
+      <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+        {/* Search Input */}
+        <div className="relative flex-1 w-full">
+          <IconSearch size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+          <input
+            type="text"
+            placeholder="Search candidates by name, interests or vibe..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-rose-500/70 transition-colors shadow-inner"
+          />
+        </div>
+
+        {/* Filters and VIP Actions Row */}
+        <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+          {/* Status Filter (All / Online) */}
+          <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-xl border border-neutral-800">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${statusFilter === 'all'
+                ? 'bg-neutral-800 text-white shadow-sm'
+                : 'text-neutral-400 hover:text-white'
+                }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setStatusFilter('online')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 ${statusFilter === 'online'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                : 'text-neutral-400 hover:text-white'
+                }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Online</span>
+            </button>
           </div>
+
+          {/* Daily Swipe Quota Badge */}
+          {swipeQuota && (
+            <div
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm transition-all ${
+                swipeQuota.remaining <= 3 && !swipeQuota.isUnlimited
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                  : 'bg-neutral-900 border-neutral-800 text-neutral-200'
+              }`}
+            >
+              <IconFlame
+                size={14}
+                className={
+                  swipeQuota.remaining <= 3 && !swipeQuota.isUnlimited
+                    ? 'text-rose-400'
+                    : 'text-rose-500'
+                }
+              />
+              {swipeQuota.isUnlimited ? (
+                <span className="text-amber-400 font-extrabold">Unlimited VIP ✨</span>
+              ) : (
+                <span>
+                  <strong className="text-white font-black">{swipeQuota.remaining}</strong> /{' '}
+                  {swipeQuota.totalAllowed} Swipes Left
+                </span>
+              )}
+            </div>
+          )}
+
+
+
+          {/* Boost Button */}
+          <button
+            onClick={handleBoost}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${isBoosted
+              ? 'bg-purple-600 text-white shadow-purple-500/30 animate-pulse'
+              : 'bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30'
+              }`}
+            title="Boost Profile Spotlight"
+          >
+            <IconBolt size={15} />
+            <span>{isBoosted ? 'Boosted 🔥' : 'Boost'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Candidates Deck */}
+      {loading ? (
+        <DiscoverSkeleton />
+      ) : filteredCandidates.length === 0 ? (
+        <div className="py-20 text-center space-y-3">
+          <p className="text-3xl">✨</p>
+          <h3 className="text-lg font-bold text-white">No Profiles Found</h3>
+          <p className="text-xs text-neutral-400">Try switching filters or check back shortly.</p>
         </div>
       ) : (
-        <div
-          className={
-            viewMode === 'grid5'
-              ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-5'
-              : viewMode === 'grid3'
-                ? 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6'
-                : viewMode === 'grid2'
-                  ? 'grid grid-cols-2 gap-3 max-w-3xl mx-auto w-full'
-                  : viewMode === 'grid1'
-                    ? 'flex flex-col items-center gap-6 max-w-md mx-auto w-full'
-                    : 'flex flex-col gap-3 max-w-4xl mx-auto w-full'
-          }
-        >
-          {displayedCandidates.map((candidate) => {
-            const { cleanBio, interests, city } = parseBioContent(candidate.bio);
-            const candidateCity = city || candidateCities[candidate.userId] || '';
-            const photosList = candidate.photos && candidate.photos.length > 0 ? candidate.photos : [];
-            const activePhotoIdx = cardPhotoIndexes[candidate.userId] || 0;
-            const currentPhotoUrl = photosList[activePhotoIdx]?.url || photosList[0]?.url;
-            const activity = formatUserActivity(candidate.userId, candidate.lastActiveAt, onlineUserIds, lastActiveMap);
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-5">
+          {filteredCandidates.map((c) => {
+            const photoUrl =
+              c.photos?.[0]?.url ||
+              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600';
+            const isBlind = discoveryMode === 'blind_date';
 
             return (
               <div
-                key={candidate.userId}
-                onClick={() => openCandidateModal(candidate)}
-                onMouseEnter={() => {
-                  if (candidate.photos && candidate.photos.length > 0) {
-                    preloadImages(candidate.photos.map((p) => p.url));
-                  }
-                }}
-                className={`group relative bg-neutral-900/90 border border-neutral-800/80 hover:border-neutral-700 hover:shadow-[0_12px_30px_-10px_rgba(0,0,0,0.8)] rounded-2xl sm:rounded-3xl overflow-hidden transition-all duration-300 cursor-pointer ${viewMode === 'list'
-                  ? 'flex flex-row items-center p-2.5 sm:p-3 gap-3 sm:gap-4 w-full'
-                  : 'w-full aspect-[3/4] flex flex-col'
+                key={c.userId}
+                onClick={() => handleOpenCandidate(c)}
+                className={`group relative aspect-[3/4] rounded-2xl overflow-hidden bg-neutral-900 border cursor-pointer transition-all hover:scale-[1.02] shadow-lg ${c.isBoosted
+                  ? 'border-amber-500/60 shadow-amber-500/20'
+                  : 'border-neutral-800 hover:border-rose-500/40'
                   }`}
               >
-                {/* Photo & Cover Container */}
-                <div
-                  onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
-                  onTouchEnd={(e) =>
-                    photosList.length > 1 &&
-                    handleTouchEnd(
-                      e,
-                      () => cycleCardPhoto(candidate.userId, photosList.length, 'next'),
-                      () => cycleCardPhoto(candidate.userId, photosList.length, 'prev')
-                    )
-                  }
-                  className={`bg-neutral-950 overflow-hidden ${viewMode === 'list'
-                    ? `relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl shrink-0 ${activity.statusText === 'Online now'
-                      ? 'ring-2 ring-emerald-500/80'
-                      : 'ring-1 ring-neutral-700/60'
-                    }`
-                    : 'relative w-full h-full absolute inset-0'
+                <img
+                  src={photoUrl}
+                  alt={c.name}
+                  className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 ${isBlind ? 'blur-xl scale-110 opacity-75' : ''
                     }`}
-                >
-                  {/* Photo Progress Bars */}
-                  {photosList.length > 1 && viewMode !== 'list' && (
-                    <div className="absolute top-2 inset-x-2 sm:top-2.5 sm:inset-x-3 flex gap-1 z-30 pointer-events-none">
-                      {photosList.map((_: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className={`h-0.5 sm:h-1 flex-1 rounded-full transition-all duration-300 ${idx === activePhotoIdx ? 'bg-white shadow' : 'bg-white/30'
-                            }`}
-                        />
-                      ))}
-                    </div>
-                  )}
+                />
 
-                  {currentPhotoUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={currentPhotoUrl}
-                      alt={candidate.name}
-                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
-                    />
+                {/* Top Spotlight Tag / Like Float */}
+                <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between">
+                  {c.isBoosted ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500 text-neutral-950 font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-md">
+                      <IconBolt size={12} /> Spotlight
+                    </span>
                   ) : (
-                    <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-gradient-to-b from-neutral-800 to-neutral-900 text-neutral-600">
-                      <IconUser size={48} stroke={1.5} />
-                    </div>
+                    <span />
                   )}
 
-                  {/* Clean Scrim Gradient */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent pointer-events-none" />
-
-                  {/* Top Left Live Status Pill - Online & Offline on Grid Views */}
-                  {viewMode !== 'list' && (
-                    <div
-                      className={`absolute top-2 left-2 sm:top-3.5 sm:left-3.5 z-20 flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full backdrop-blur-md transition-all ${activity.isOnline
-                          ? 'bg-black/60 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
-                          : 'bg-black/50 border border-neutral-700/50 text-neutral-300'
-                        }`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${activity.isOnline
-                            ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-                            : 'bg-neutral-500'
-                          }`}
-                      />
-                      <span
-                        className={`text-[9px] sm:text-[10px] font-semibold tracking-wide ${activity.isOnline ? 'text-emerald-300' : 'text-neutral-300'
-                          }`}
-                      >
-                        {activity.isOnline ? 'Online' : activity.statusText || 'Offline'}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Subtle online/offline status indicator dot on avatar in list view */}
-                  {viewMode === 'list' && (
-                    <span
-                      className={`absolute bottom-1 right-1 w-3 h-3 rounded-full border-2 border-neutral-900 z-20 shadow-md ${activity.isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]' : 'bg-neutral-600'
-                        }`}
-                    />
-                  )}
-
-                  {/* Left / Right Photo Arrows for Card */}
-                  {photosList.length > 1 && viewMode !== 'list' && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cycleCardPhoto(candidate.userId, photosList.length, 'prev');
-                        }}
-                        className="absolute left-1.5 sm:left-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 rounded-full bg-black/50 border border-white/15 text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
-                        title="Previous photo"
-                        aria-label="Previous photo"
-                      >
-                        <IconChevronLeft size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          cycleCardPhoto(candidate.userId, photosList.length, 'next');
-                        }}
-                        className="absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 p-1.5 sm:p-2 rounded-full bg-black/50 border border-white/15 text-white hover:bg-rose-500 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 cursor-pointer shadow-lg hover:scale-110"
-                        title="Next photo"
-                        aria-label="Next photo"
-                      >
-                        <IconChevronRight size={14} />
-                      </button>
-                    </>
-                  )}
-
-                  {/* Clean Match Heart Action */}
                   <button
-                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleToggleLike(candidate);
+                      handleToggleLike(c);
                     }}
-                    title={candidate.liked ? 'Matched! Click to unmatch' : 'Click to match'}
-                    aria-label={`Match ${candidate.name}`}
-                    className={`absolute top-2 right-2 sm:top-3.5 sm:right-3.5 z-20 transition-all duration-300 transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-md ${viewMode === 'list' ? 'hidden' : ''
-                      } ${candidate.liked
-                        ? 'text-rose-500 opacity-100 drop-shadow-[0_2px_12px_rgba(244,63,94,0.8)]'
-                        : 'text-white/90 hover:text-rose-400 opacity-90 sm:opacity-0 sm:group-hover:opacity-100'
-                      }`}
+                    className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-md flex items-center justify-center text-white hover:text-rose-500 transition-colors"
                   >
-                    {candidate.liked ? (
-                      <IconHeartFilled size={22} className="animate-pulse text-rose-500 sm:w-6 sm:h-6" />
-                    ) : (
-                      <IconHeart size={22} className="stroke-[2.2] sm:w-6 sm:h-6" />
-                    )}
+                    <IconHeart
+                      size={16}
+                      className={c.liked ? 'text-rose-500 fill-rose-500' : 'text-white'}
+                    />
                   </button>
-
-                  {/* Candidate Information Bottom Overlay */}
-                  <div
-                    className={
-                      viewMode === 'list'
-                        ? 'hidden'
-                        : 'absolute bottom-0 left-0 right-0 p-2.5 sm:p-4 text-white pointer-events-none z-20'
-                    }
-                  >
-                    <div className="flex items-center gap-1 sm:gap-1.5">
-                      <h3 className="text-xs sm:text-base font-bold tracking-tight truncate text-white">
-                        {candidate.name}
-                      </h3>
-                      <IconCircleCheckFilled size={13} className="text-rose-400 shrink-0 sm:w-4 sm:h-4" />
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] sm:text-xs text-neutral-300/90 mt-0.5">
-                      <IconMapPin size={11} className="text-rose-400 shrink-0" />
-                      <span className="truncate font-medium">
-                        {candidateCity
-                          ? `${candidateCity}${candidate.distance_km != null && candidate.distance_km > 0 ? ` • ${candidate.distance_km.toFixed(1)} km` : ''}`
-                          : candidate.distance_km != null && candidate.distance_km > 0
-                            ? `${candidate.distance_km.toFixed(1)} km`
-                            : 'Nearby'}
-                      </span>
-                    </div>
-                  </div>
                 </div>
 
-                {/* List View Details */}
-                {viewMode === 'list' && (
-                  <div className="flex-1 flex items-center justify-between min-w-0 pr-1 z-10">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                        <h3 className="text-sm sm:text-base font-bold text-white truncate flex items-center gap-1.5">
-                          <span>{candidate.name}</span>
-                          <IconCircleCheckFilled size={15} className="text-rose-400 shrink-0" />
-                        </h3>
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold px-2.5 py-0.5 rounded-full border transition-all ${activity.statusText === 'Online now'
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                            : 'bg-neutral-800/80 border-neutral-700/60 text-neutral-400'
-                            }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${activity.dotClass}`} />
-                          <span>{activity.statusText}</span>
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-                        <IconMapPin size={12} className="text-rose-400 shrink-0" />
-                        <span className="truncate font-medium">
-                          {candidateCity
-                            ? `${candidateCity}${candidate.distance_km != null && candidate.distance_km > 0 ? ` • ${candidate.distance_km.toFixed(1)} km away` : ''}`
-                            : candidate.distance_km != null && candidate.distance_km > 0
-                              ? `${candidate.distance_km.toFixed(1)} km away`
-                              : 'Nearby'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleLike(candidate);
-                      }}
-                      title={candidate.liked ? 'Matched! Click to unmatch' : 'Click to match'}
-                      className={`p-2.5 rounded-2xl border transition-all ml-2.5 shrink-0 cursor-pointer active:scale-90 ${candidate.liked
-                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-500 shadow-sm'
-                        : 'bg-neutral-800/80 hover:bg-neutral-700 border-neutral-700/60 text-neutral-400 hover:text-rose-400'
-                        }`}
-                    >
-                      {candidate.liked ? (
-                        <IconHeartFilled size={20} className="text-rose-500 animate-pulse" />
-                      ) : (
-                        <IconHeart size={20} />
-                      )}
-                    </button>
+                {/* Bottom Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/20 to-transparent flex flex-col justify-end p-3 space-y-1">
+                  <div className="font-bold text-white text-sm flex items-center gap-1.5">
+                    <span>{isBlind ? 'Mystery Match' : c.name}</span>
+                    {(c.isVerified || c.verified) && !isBlind && (
+                      <span className="text-blue-400 text-xs" title="Verified Blue Badge">
+                        🛡️
+                      </span>
+                    )}
                   </div>
-                )}
+
+                  {c.topPickReason ? (
+                    <span className="text-[10px] text-amber-400 font-bold">{c.topPickReason}</span>
+                  ) : (
+                    <div className="flex items-center gap-1 text-[11px] text-neutral-400">
+                      <IconMapPin size={12} className="text-rose-400" />
+                      <span>{c.distance_km ? `${c.distance_km.toFixed(1)} km away` : 'Nearby'}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Infinite Scroll Sentinel */}
-      <div ref={observerTarget} className="w-full h-8 pointer-events-none" />
-
-      {/* Skeleton Loading on Scroll Down */}
-      {loadingMore && (
-        <div className="mt-4">
-          <DiscoverSkeleton viewMode={viewMode} count={viewMode === 'grid5' ? 5 : viewMode === 'grid3' ? 3 : 2} />
-        </div>
-      )}
-
-      {/* Pagination Load More */}
-      {hasMore && !loadingMore && (
-        <div className="mt-8 text-center">
-          <button
-            onClick={loadMoreCandidates}
-            className="px-6 py-2.5 bg-neutral-900 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white font-semibold text-xs rounded-full shadow-lg transition-all cursor-pointer"
-          >
-            Load More Profiles
-          </button>
-        </div>
-      )}
-
-      {/* Production-Grade Candidate Profile Detail Modal */}
-      {selectedCandidate && (() => {
-        const { cleanBio, interests, city: modalCityFromBio } = parseBioContent(selectedCandidate.bio);
-        const modalCity = modalCityFromBio || candidateCities[selectedCandidate.userId] || '';
-        const photosList = selectedCandidate.photos && selectedCandidate.photos.length > 0
-          ? selectedCandidate.photos
-          : [];
-        const currentPhotoUrl = photosList[Math.min(currentPhotoIndex, photosList.length - 1)]?.url;
-        const modalActivity = formatUserActivity(selectedCandidate.userId, selectedCandidate.lastActiveAt, onlineUserIds, lastActiveMap);
-
-        return (
+      {/* Candidate Detail Modal */}
+      {selectedCandidate && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-2xl overflow-hidden animate-in fade-in duration-200"
+          onClick={() => setSelectedCandidate(null)}
+        >
           <div
-            className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setSelectedCandidate(null);
-            }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full h-full sm:h-[92vh] sm:max-h-[850px] sm:max-w-md md:max-w-lg flex flex-col bg-neutral-950 sm:bg-neutral-900 sm:rounded-3xl sm:border sm:border-neutral-800 shadow-2xl shadow-black overflow-hidden animate-in zoom-in-95 duration-200"
           >
-            <div className="relative w-full max-w-lg md:max-w-3xl bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl flex flex-col md:flex-row max-h-[92vh] md:h-[540px] overflow-y-auto md:overflow-hidden my-auto">
-
-              {/* Close Button */}
-              <button
-                onClick={() => setSelectedCandidate(null)}
-                className="absolute top-3.5 right-3.5 z-40 p-2 rounded-full bg-black/60 border border-white/10 text-white/80 hover:text-white hover:bg-black/90 transition-all cursor-pointer backdrop-blur-md shadow-lg"
-                title="Close modal"
-              >
-                <IconX size={18} />
-              </button>
-
-              {/* LEFT HALF / TOP ON MOBILE: Interactive Photo Showcase */}
-              <div
-                onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
-                onTouchEnd={(e) =>
-                  photosList.length > 1 &&
-                  handleTouchEnd(
-                    e,
-                    () => setCurrentPhotoIndex((prev) => (prev < photosList.length - 1 ? prev + 1 : 0)),
-                    () => setCurrentPhotoIndex((prev) => (prev > 0 ? prev - 1 : photosList.length - 1))
-                  )
+            {/* Photo Carousel Banner */}
+            <div className="relative h-72 sm:h-80 w-full shrink-0 bg-neutral-950 select-none overflow-hidden">
+              <img
+                src={
+                  selectedCandidate.photos?.[selectedPhotoIdx]?.url ||
+                  selectedCandidate.photos?.[0]?.url ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600'
                 }
-                className="relative w-full md:w-1/2 aspect-[4/5] md:aspect-auto md:h-full bg-neutral-950 shrink-0 overflow-hidden group select-none"
-              >
-                {/* Photo Story Bars */}
-                {photosList.length > 1 && (
-                  <div className="absolute top-3 inset-x-3 flex gap-1 z-30 pointer-events-none">
-                    {photosList.map((_: any, idx: number) => (
-                      <div
+                alt={selectedCandidate.name}
+                className="w-full h-full object-cover transition-all duration-300"
+              />
+
+              {/* Gradient Overlays */}
+              <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-black/60 pointer-events-none" />
+
+              {/* Top Floating Badges */}
+              <div className="absolute top-3.5 left-3.5 right-3.5 flex items-center justify-between z-10">
+                <div className="flex items-center gap-2">
+                  {selectedCandidate.isBoosted && (
+                    <span className="px-2.5 py-1 rounded-full bg-amber-500 text-neutral-950 font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-lg shadow-amber-500/30">
+                      <IconBolt size={12} /> Spotlight
+                    </span>
+                  )}
+                  {(() => {
+                    const activity = formatUserActivity(
+                      selectedCandidate.userId,
+                      selectedCandidate.updatedAt,
+                      onlineUserIds,
+                      lastActiveMap
+                    );
+                    return activity.isOnline ? (
+                      <span className="px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-emerald-400 font-bold text-[11px] flex items-center gap-1.5 border border-emerald-500/30">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        Online Now
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+              </div>
+
+              {/* Left / Right Photo Arrows */}
+              {selectedCandidate.photos?.length > 1 && (
+                <>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPhotoIdx((prev) =>
+                        prev === 0 ? selectedCandidate.photos.length - 1 : prev - 1
+                      );
+                    }}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-md transition-all border border-white/10 hover:scale-105 z-10"
+                    title="Previous Photo"
+                  >
+                    <IconChevronLeft size={18} />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPhotoIdx((prev) =>
+                        prev === selectedCandidate.photos.length - 1 ? 0 : prev + 1
+                      );
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-md transition-all border border-white/10 hover:scale-105 z-10"
+                    title="Next Photo"
+                  >
+                    <IconChevronRight size={18} />
+                  </button>
+                </>
+              )}
+
+              {/* Photo Indicators & Counter */}
+              {selectedCandidate.photos?.length > 1 && (
+                <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between z-10">
+                  <div className="flex items-center gap-1.5">
+                    {selectedCandidate.photos.map((_: any, idx: number) => (
+                      <button
                         key={idx}
-                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${idx === currentPhotoIndex ? 'bg-white shadow' : 'bg-white/30'
-                          }`}
+                        onClick={() => setSelectedPhotoIdx(idx)}
+                        className={`h-1.5 rounded-full transition-all ${
+                          selectedPhotoIdx === idx ? 'w-6 bg-rose-500' : 'w-1.5 bg-white/50 hover:bg-white/80'
+                        }`}
                       />
                     ))}
                   </div>
-                )}
+                  <span className="px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-md text-white/90 text-[10px] font-bold border border-white/10">
+                    {selectedPhotoIdx + 1} / {selectedCandidate.photos.length}
+                  </span>
+                </div>
+              )}
+            </div>
 
-                {currentPhotoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={currentPhotoUrl}
-                    alt={selectedCandidate.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-neutral-900 text-neutral-600 min-h-[300px]">
-                    <IconUser size={64} stroke={1.5} />
-                  </div>
-                )}
+            {/* Scrollable Details Body */}
+            <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-left">
+              {(() => {
+                const parsed = parseBioContent(selectedCandidate.bio);
+                const age = calculateAge(selectedCandidate.birthDate);
+                const location =
+                  parsed.city ||
+                  (selectedCandidate.distance_km
+                    ? `${selectedCandidate.distance_km.toFixed(1)} km away`
+                    : 'Nearby');
+                const intentLabel = formatIntent(
+                  parsed.intent || selectedCandidate.relationshipIntent
+                );
 
-                {/* Left/Right Photo Browsing Arrows */}
-                {photosList.length > 1 && (
+                return (
                   <>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) => (prev > 0 ? prev - 1 : photosList.length - 1));
-                      }}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg hover:scale-105"
-                      title="Previous photo"
-                    >
-                      <IconChevronLeft size={18} />
-                    </button>
+                    {/* Profile Header Block */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-2xl font-black text-white tracking-tight">
+                            {selectedCandidate.name}
+                            {age && (
+                              <span className="font-semibold text-neutral-300 ml-1.5">, {age}</span>
+                            )}
+                          </h2>
+                          {(selectedCandidate.isVerified || selectedCandidate.verified) && (
+                            <span className="inline-flex items-center text-blue-400" title="Verified Profile">
+                              <IconShieldCheck size={20} className="fill-blue-500/20" />
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-neutral-400 mt-1 flex items-center gap-1">
+                          <IconMapPin size={13} className="text-rose-400 shrink-0" />
+                          <span>{location}</span>
+                        </p>
+                      </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCurrentPhotoIndex((prev) => (prev < photosList.length - 1 ? prev + 1 : 0));
-                      }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 border border-white/10 text-white/90 hover:text-white hover:bg-rose-500 backdrop-blur-md transition-all z-20 cursor-pointer shadow-lg hover:scale-105"
-                      title="Next photo"
-                    >
-                      <IconChevronRight size={18} />
-                    </button>
-                  </>
-                )}
-
-                {/* Photo Badge Count */}
-                {photosList.length > 1 && (
-                  <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-bold text-white/90 backdrop-blur-md z-20">
-                    {currentPhotoIndex + 1} / {photosList.length}
-                  </div>
-                )}
-              </div>
-
-              {/* RIGHT HALF / BOTTOM ON MOBILE: Profile Details & Sticky Actions */}
-              <div className="w-full md:w-1/2 flex flex-col justify-between md:overflow-y-auto bg-neutral-900 text-white">
-                <div className="p-5 sm:p-6 md:p-7 space-y-4">
-                  {/* Name, Verified Badge & Status */}
-                  <div className="pr-8">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-2xl font-bold tracking-tight text-white truncate">
-                        {selectedCandidate.name}
-                      </h2>
-                      <IconCircleCheckFilled size={20} className="text-rose-400 shrink-0" />
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 mt-2">
-                      {/* Location Pill */}
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-800/80 border border-neutral-700/60 text-neutral-300 text-xs font-medium">
-                        <IconMapPin size={13} className="text-rose-400 shrink-0" />
-                        <span>
-                          {modalCity
-                            ? `${modalCity}${selectedCandidate.distance_km != null && selectedCandidate.distance_km > 0
-                              ? ` • ${selectedCandidate.distance_km.toFixed(1)} km away`
-                              : ''
-                            }`
-                            : selectedCandidate.distance_km != null && selectedCandidate.distance_km > 0
-                              ? `${selectedCandidate.distance_km.toFixed(1)} km away`
-                              : 'Nearby'}
-                        </span>
-                      </span>
-
-                      {/* Online Status Badge */}
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-neutral-800/80 border border-neutral-700/60 text-xs font-medium">
-                        <span className={`w-2 h-2 rounded-full ${modalActivity.dotClass}`} />
-                        <span className={modalActivity.textClass}>{modalActivity.statusText}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Clean Hinge-Style About Card */}
-                  {cleanBio && (
-                    <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-                        About
-                      </span>
-                      <div className="bg-neutral-800/40 border border-neutral-700/40 p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm text-neutral-200 leading-relaxed break-words">
-                        {cleanBio}
+                      {/* Chemistry Match Score */}
+                      <div className="px-3 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 font-bold text-xs flex items-center gap-1.5 shrink-0 shadow-sm">
+                        <IconSparkles size={14} className="text-purple-400" />
+                        <span>94% Chemistry</span>
                       </div>
                     </div>
-                  )}
 
-                  {/* Passions / Interests Chips */}
-                  {interests.length > 0 && (
+                    {/* Relationship Intent Chip */}
+                    {intentLabel && (
+                      <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs font-semibold">
+                        <span>{intentLabel}</span>
+                      </div>
+                    )}
+
+                    {/* Bio / About */}
                     <div className="space-y-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-                        Passions
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {interests.map((tag) => (
+                      <h4 className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">About</h4>
+                      <div className="p-3.5 rounded-2xl bg-neutral-800/60 border border-neutral-800/80 text-sm text-neutral-200 leading-relaxed">
+                        {parsed.cleanBio || 'Exploring good coffee, lively conversations, and new experiences.'}
+                      </div>
+                    </div>
+
+                    {/* Voice Bio Player (if candidate has recorded one) */}
+                    {selectedCandidate.voiceBioUrl && (
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-rose-950/40 via-neutral-900 to-neutral-950 border border-rose-900/40 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => toggleVoiceBio(selectedCandidate.userId, selectedCandidate.voiceBioUrl)}
+                            className="w-10 h-10 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg transition-transform active:scale-95"
+                          >
+                            {playingVoiceId === selectedCandidate.userId ? (
+                              <IconPlayerPause size={20} />
+                            ) : (
+                              <IconPlayerPlay size={20} className="ml-0.5" />
+                            )}
+                          </button>
+                          <div>
+                            <span className="text-xs font-bold text-white block">Voice Introduction</span>
+                            <span className="text-[11px] text-rose-400 font-medium flex items-center gap-1">
+                              <IconVolume size={12} /> {selectedCandidate.name}&apos;s audio intro
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 pr-2">
+                          {[30, 60, 90, 50, 80, 45, 100, 70, 40, 85].map((h, i) => (
+                            <span
+                              key={i}
+                              className={`w-1 rounded-full bg-rose-500 transition-all ${
+                                playingVoiceId === selectedCandidate.userId ? 'animate-pulse' : 'opacity-50'
+                              }`}
+                              style={{ height: `${h * 0.22}px` }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+
+                    {/* Interests & Passions */}
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">Interests & Passions</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(parsed.interests.length > 0
+                          ? parsed.interests
+                          : selectedCandidate.interests || ['coffee', 'travel', 'music']
+                        ).map((tag: string) => (
                           <span
                             key={tag}
-                            className="px-3 py-1 rounded-full bg-neutral-800/60 border border-neutral-700/50 text-xs font-medium text-neutral-300 shadow-sm"
+                            className="px-3 py-1.5 rounded-xl bg-neutral-800/90 text-neutral-200 text-xs font-medium border border-neutral-700/60 shadow-sm"
                           >
                             {INTEREST_LABELS[tag] || tag}
                           </span>
                         ))}
                       </div>
                     </div>
-                  )}
-                </div>
 
-                {/* Sticky Bottom Action Footer */}
-                <div className="sticky bottom-0 bg-neutral-900/95 backdrop-blur-md p-4 sm:p-5 border-t border-neutral-800/80 mt-auto flex items-center gap-3 z-30">
-                  {/* Match Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleToggleLike(selectedCandidate)}
-                    className={`flex-1 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg active:scale-[0.98] ${selectedCandidate.liked
-                      ? 'bg-rose-500/15 border border-rose-500/40 text-rose-400 hover:bg-rose-500/25 shadow-rose-950/20'
-                      : 'bg-gradient-to-r from-rose-500 to-amber-500 hover:opacity-95 text-white shadow-rose-500/25'
-                      }`}
-                  >
-                    {selectedCandidate.liked ? (
-                      <>
-                        <IconHeartFilled size={18} className="text-rose-500 shrink-0" />
-                        <span>Matched</span>
-                      </>
-                    ) : (
-                      <>
-                        <IconHeart size={18} className="stroke-[2.2] shrink-0" />
-                        <span>Match</span>
-                      </>
+
+
+                    {/* Two Truths & A Lie Interactive Game */}
+                    {selectedCandidate.twoTruths && (
+                      <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-3">
+                        <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <span>🎭</span> Two Truths & A Lie — Guess the lie!
+                        </h4>
+                        <div className="space-y-2">
+                          {selectedCandidate.twoTruths.statements.map((stmt: string, idx: number) => {
+                            const isLie = idx === selectedCandidate.twoTruths?.lieIndex;
+                            const hasGuessed = guessedLieIdx !== null;
+                            return (
+                              <button
+                                key={idx}
+                                onClick={() => setGuessedLieIdx(idx)}
+                                className={`w-full text-left p-2.5 rounded-xl border text-xs font-medium transition-all flex items-center justify-between ${
+                                  hasGuessed && isLie
+                                    ? 'bg-red-500/20 border-red-500 text-red-300'
+                                    : hasGuessed && guessedLieIdx === idx && !isLie
+                                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                                    : 'bg-neutral-800/80 border-neutral-700/60 text-white hover:bg-neutral-800'
+                                }`}
+                              >
+                                <span>{stmt}</span>
+                                {hasGuessed && (
+                                  <span className="font-bold text-[10px]">
+                                    {isLie ? '❌ That is the Lie!' : '✅ Truth!'}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     )}
-                  </button>
 
-                  {/* Chat Now Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleStartChat(selectedCandidate)}
-                    disabled={startingChat}
-                    className="flex-1 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer bg-neutral-800 hover:bg-neutral-700 border border-neutral-700/80 text-white active:scale-[0.98] disabled:opacity-50"
-                  >
-                    <IconMessageCircle2 size={18} className="text-rose-400 shrink-0" />
-                    <span>{startingChat ? 'Connecting...' : 'Chat Now'}</span>
-                  </button>
-                </div>
-              </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Pinned Bottom Action Bar (Production Tinder/Bumble Dock) */}
+            <div className="p-3.5 sm:p-4 bg-neutral-950/95 sm:bg-neutral-900/95 backdrop-blur-md border-t border-neutral-800/80 shrink-0 flex items-center justify-between gap-2.5 z-20">
+              {/* Pass Button */}
+              <button
+                onClick={() => {
+                  handleSwipePass(selectedCandidate);
+                }}
+                className="w-12 h-12 rounded-full bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-rose-400 border border-neutral-800 hover:border-rose-500/50 flex items-center justify-center transition-all active:scale-95 shadow-md group shrink-0"
+                title="Pass Profile"
+              >
+                <IconX size={22} className="group-hover:scale-110 transition-transform stroke-[2.5]" />
+              </button>
+
+              {/* Compliment / Super Like Shortcut */}
+              <button
+                onClick={() => setShowComplimentModal(true)}
+                className="w-12 h-12 rounded-full bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 flex items-center justify-center transition-all active:scale-95 shadow-md group shrink-0"
+                title="Send Compliment (Super Like)"
+              >
+                <IconStar size={20} className="fill-purple-400 text-purple-400 group-hover:scale-110 transition-transform" />
+              </button>
+
+              {/* Match & Connect / Liked Button */}
+              <button
+                onClick={() => handleToggleLike(selectedCandidate)}
+                className={`flex-1 h-12 px-4 rounded-full font-black text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] cursor-pointer ${
+                  selectedCandidate.liked
+                    ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/25'
+                    : 'bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 hover:from-rose-600 hover:to-pink-600 text-white shadow-rose-500/30'
+                }`}
+              >
+                <IconHeart size={20} className={selectedCandidate.liked ? 'fill-white stroke-[2]' : 'fill-white/20 stroke-[2]'} />
+                <span>{selectedCandidate.liked ? 'Liked ❤️' : 'Like'}</span>
+              </button>
+
+              {/* Chat Button */}
+              <button
+                onClick={() => {
+                  setSelectedCandidate(null);
+                  router.push('/chat');
+                }}
+                className="w-12 h-12 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white border border-neutral-800 hover:border-neutral-700 flex items-center justify-center transition-all active:scale-95 shadow-md shrink-0"
+                title="Open Chat"
+              >
+                <IconMessageCircle2 size={20} className="stroke-[2]" />
+              </button>
+
+              {/* Safety: Report */}
+              <button
+                onClick={() => setShowReportModal(true)}
+                className="w-10 h-10 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-amber-400 border border-neutral-800 flex items-center justify-center transition-all shrink-0"
+                title="Report Profile"
+              >
+                <IconFlag size={16} />
+              </button>
             </div>
           </div>
-        );
-      })()}
+        </div>
+      )}
 
-      {/* Story Viewer Modal */}
-      {activeStoryUserIdx !== null && (
+      {/* Compliment Modal */}
+      {showComplimentModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4">
+          <div className="w-full max-w-md rounded-2xl bg-neutral-900 border border-neutral-800 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-base flex items-center gap-1.5">
+                <span>💌</span> Send a Compliment
+              </h3>
+              <button
+                onClick={() => setShowComplimentModal(false)}
+                className="text-neutral-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-neutral-400">
+              Leave a note on {selectedCandidate?.name}&apos;s profile to send with a Super Like:
+            </p>
+            <textarea
+              value={complimentText}
+              onChange={(e) => setComplimentText(e.target.value)}
+              placeholder="e.g. Loved your concert photo! Who was playing?"
+              maxLength={140}
+              className="w-full h-24 p-3 rounded-xl bg-neutral-800 border border-neutral-700 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500 resize-none"
+            />
+            <button
+              onClick={handleSendCompliment}
+              disabled={sendingCompliment}
+              className="w-full py-2.5 rounded-xl bg-purple-500 hover:bg-purple-600 text-white font-bold text-xs transition-colors shadow-lg shadow-purple-500/25"
+            >
+              {sendingCompliment ? 'Sending...' : 'Send with Super Like ⭐'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/95 backdrop-blur-2xl p-4">
+          <div className="w-full max-w-md rounded-2xl bg-neutral-900 border border-neutral-800 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-white text-base">Report {selectedCandidate?.name}</h3>
+              <button onClick={() => setShowReportModal(false)} className="text-neutral-400 hover:text-white">✕</button>
+            </div>
+            <div className="space-y-2">
+              {[
+                { id: 'harassment', label: 'Harassment or Inappropriate behavior' },
+                { id: 'fake_profile', label: 'Fake Profile / Catfish' },
+                { id: 'inappropriate_photos', label: 'Inappropriate Photos' },
+                { id: 'spam', label: 'Spam or Promotional' },
+              ].map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => setReportReason(r.id)}
+                  className={`w-full text-left p-2.5 rounded-xl border text-xs font-medium transition-all ${reportReason === r.id
+                    ? 'bg-red-500/20 border-red-500 text-white'
+                    : 'bg-neutral-800 border-neutral-700 text-neutral-300'
+                    }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={reportDetails}
+              onChange={(e) => setReportDetails(e.target.value)}
+              placeholder="Additional details (optional)..."
+              className="w-full h-20 p-2.5 rounded-xl bg-neutral-800 border border-neutral-700 text-xs text-white placeholder-neutral-500 resize-none"
+            />
+            <button
+              onClick={handleReportSubmit}
+              disabled={submittingReport}
+              className="w-full py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-xs transition-colors"
+            >
+              {submittingReport ? 'Submitting...' : 'Submit Report to Moderation'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Global Notification Modal */}
+      <NotificationModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
+
+      {/* Stories Viewer & Upload Modals */}
+      {activeStoryIdx !== null && storyGroups[activeStoryIdx] && (
         <StoryViewerModal
           groups={storyGroups}
-          initialUserIndex={activeStoryUserIdx}
-          onClose={() => setActiveStoryUserIdx(null)}
+          initialUserIndex={activeStoryIdx}
+          onClose={() => setActiveStoryIdx(null)}
           onStoryDeleted={() => fetchStories()}
         />
       )}
-
-      {/* Story Upload Modal */}
       {isUploadStoryOpen && (
         <StoryUploadModal
           onClose={() => setIsUploadStoryOpen(false)}
           onStoryUploaded={() => fetchStories()}
         />
       )}
-    </main>
+    </div>
   );
 }

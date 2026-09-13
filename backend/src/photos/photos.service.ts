@@ -27,6 +27,19 @@ export class PhotosService {
     });
   }
 
+  async uploadBase64(userId: string, base64Data: string, contentType = 'image/jpeg', order = 0) {
+    const count = await this.prisma.photo.count({ where: { userId } });
+    if (count >= MAX_PHOTOS) {
+      throw new BadRequestException(`Maximum ${MAX_PHOTOS} photos allowed. Please delete a photo before uploading a new one.`);
+    }
+    const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const { publicUrl } = await this.s3.uploadBuffer(userId, buffer, contentType, 'photos');
+    return this.prisma.photo.create({
+      data: { userId, url: publicUrl, order },
+    });
+  }
+
   async confirmUpload(userId: string, publicUrl: string, key: string, order = 0) {
     const count = await this.prisma.photo.count({ where: { userId } });
     if (count >= MAX_PHOTOS) {

@@ -5,6 +5,7 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppTabs from '@/components/app-tabs';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { PresenceProvider } from '@/context/PresenceContext';
 import { TabBarVisibilityProvider } from '@/context/TabBarVisibilityContext';
 import { NotificationProvider } from '@/context/NotificationContext';
 import WhatsAppNotificationBanner from '@/components/WhatsAppNotificationBanner';
@@ -56,7 +57,9 @@ export default function TabLayout() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <RootLayoutNav />
+        <PresenceProvider>
+          <RootLayoutNav />
+        </PresenceProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );

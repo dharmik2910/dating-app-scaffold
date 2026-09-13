@@ -1,11 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { IconFlame, IconCompass, IconHeart, IconUser, IconLogout, IconMessages } from '@tabler/icons-react';
+import {
+  IconFlame,
+  IconCompass,
+  IconHeart,
+  IconUser,
+  IconLogout,
+  IconMessages,
+  IconBell,
+  IconShieldCheck,
+} from '@tabler/icons-react';
 import { useAuth } from '@/components/AuthContext';
 import { useChatStore } from '@/lib/useChatStore';
+import NotificationModal from '@/components/NotificationModal';
 
 type NavbarProps = {
   user?: any;
@@ -20,6 +30,7 @@ export default function Navbar({ user: propUser }: NavbarProps) {
   const unreadCount = unreadMatchIds.length;
 
   const [isVisible, setIsVisible] = useState(true);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     let lastScrollY = typeof window !== 'undefined' ? Math.max(0, window.scrollY) : 0;
@@ -31,14 +42,11 @@ export default function Navbar({ user: propUser }: NavbarProps) {
           const currentScrollY = Math.max(0, window.scrollY);
           const diff = currentScrollY - lastScrollY;
 
-          // Always visible near the top of the page
           if (currentScrollY <= 15) {
             setIsVisible(true);
           } else if (diff > 3 && currentScrollY > 40) {
-            // Scrolling DOWN -> Hide menu / navbar
             setIsVisible(false);
           } else if (diff < 0) {
-            // Scrolling UP -> Reveal menu / navbar immediately
             setIsVisible(true);
           }
 
@@ -100,7 +108,7 @@ export default function Navbar({ user: propUser }: NavbarProps) {
             </span>
           </Link>
 
-          {/* Desktop Nav Links (Large screens lg and up) */}
+          {/* Desktop Nav Links */}
           <nav className="hidden lg:flex items-center space-x-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -109,10 +117,11 @@ export default function Navbar({ user: propUser }: NavbarProps) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${isActive
-                    ? 'bg-neutral-800 text-white shadow-sm'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
-                    }`}
+                  className={`relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-neutral-800 text-white shadow-sm'
+                      : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
+                  }`}
                 >
                   <Icon size={18} className={isActive ? 'text-ember' : 'text-neutral-400'} />
                   <span>{item.name}</span>
@@ -126,8 +135,30 @@ export default function Navbar({ user: propUser }: NavbarProps) {
             })}
           </nav>
 
-          {/* Action Profile & Logout */}
+          {/* Right Action Icons & Admin Panel */}
           <div className="flex items-center gap-3">
+            {/* Notification Bell */}
+            <button
+              onClick={() => setShowNotifications(true)}
+              className="relative p-2 text-neutral-400 hover:text-white rounded-full hover:bg-neutral-900 transition-colors border border-neutral-800"
+              title="Notifications"
+            >
+              <IconBell size={18} />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500" />
+            </button>
+
+            {/* Admin Panel Link (Only visible to Admin phone 9924662647) */}
+            {user?.phone && user.phone.includes('9924662647') && (
+              <Link
+                href="/admin"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg transition-colors border border-amber-500/30"
+                title="Admin Panel"
+              >
+                <IconShieldCheck size={16} />
+                <span>Admin</span>
+              </Link>
+            )}
+
             {user?.profile?.name && (
               <span className="hidden sm:inline text-xs font-medium text-neutral-400">
                 Hi, <span className="text-neutral-200">{user.profile.name}</span>
@@ -145,7 +176,7 @@ export default function Navbar({ user: propUser }: NavbarProps) {
         </div>
       </header>
 
-      {/* Mobile & Tablet Bottom Navigation Bar (Shown up to lg screens) */}
+      {/* Mobile Bottom Navigation Bar */}
       <div
         className={`lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950/90 backdrop-blur-lg px-6 py-2 transition-transform duration-300 ease-in-out ${
           isVisible ? 'translate-y-0' : 'translate-y-full pointer-events-none'
@@ -159,8 +190,9 @@ export default function Navbar({ user: propUser }: NavbarProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`relative flex flex-col items-center py-1 px-3 rounded-xl transition-all ${isActive ? 'text-ember font-semibold' : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
+                className={`relative flex flex-col items-center py-1 px-3 rounded-xl transition-all ${
+                  isActive ? 'text-ember font-semibold' : 'text-neutral-400 hover:text-neutral-200'
+                }`}
               >
                 <div className="relative">
                   <Icon size={22} />
@@ -177,6 +209,12 @@ export default function Navbar({ user: propUser }: NavbarProps) {
           })}
         </div>
       </div>
+
+      {/* Global Notification Modal */}
+      <NotificationModal
+        isOpen={showNotifications}
+        onClose={() => setShowNotifications(false)}
+      />
     </>
   );
 }

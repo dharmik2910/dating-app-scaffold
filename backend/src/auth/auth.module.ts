@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
@@ -7,9 +7,11 @@ import { FirebaseService } from './firebase.service';
 import { AwsSmsService } from './aws-sms.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
+@Global()
 @Module({
   imports: [
     JwtModule.registerAsync({
+      global: true,
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -22,7 +24,6 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
   ],
   controllers: [AuthController],
   providers: [AuthService, FirebaseService, AwsSmsService, JwtAuthGuard],
-  exports: [JwtModule, JwtAuthGuard],
+  exports: [AuthService, JwtModule, JwtAuthGuard],
 })
-export class AuthModule { }
-
+export class AuthModule {}

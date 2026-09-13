@@ -213,5 +213,153 @@ export const api = {
     request<{ viewerId: string; viewedAt: string; name: string; photoUrl: string | null; bio: string | null; age: number | null }[]>(`/stories/${storyId}/viewers`),
   deleteStory: (storyId: string) =>
     request(`/stories/${storyId}`, { method: 'DELETE' }),
+
+  // VIP & Swipes Extensions
+  getWhoLikedMe: () => request('/swipes/who-liked-me'),
+  boostProfile: (durationMinutes = 30) =>
+    request('/swipes/boost', { method: 'POST', body: JSON.stringify({ durationMinutes }) }),
+  sendCompliment: (receiverId: string, content: string, targetType = 'profile', targetId?: string) =>
+    request('/swipes/compliment', {
+      method: 'POST',
+      body: JSON.stringify({ receiverId, content, targetType, targetId }),
+    }),
+
+  // Discovery Modes
+  getTopPicks: () => request('/discovery/top-picks'),
+  getBlindDateQueue: () => request('/discovery/blind-date'),
+
+  // AI Matching & Icebreakers
+  getAiIcebreakers: (targetUserId: string) =>
+    request(`/ai/icebreakers/${targetUserId}`, { method: 'POST' }),
+  generateAiIcebreakers: (targetUserId: string) =>
+    request(`/ai/icebreakers/${targetUserId}`, { method: 'POST' }),
+  getAiCompatibility: (targetUserId: string) =>
+    request(`/ai/compatibility/${targetUserId}`),
+  generateAiBio: (vibe: 'funny' | 'romantic' | 'adventurous' | 'creative' = 'creative') =>
+    request('/ai/generate-bio', { method: 'POST', body: JSON.stringify({ vibe }) }),
+
+  // Profile Prompts & Settings
+  getProfilePrompts: async () => {
+    const res = await request<any>('/users/me');
+    return res?.profile?.prompts || [];
+  },
+  createProfilePrompt: (data: { question: string; answer: string; order?: number }) =>
+    request('/users/me/prompts', {
+      method: 'POST',
+      body: JSON.stringify({ question: data.question, answer: data.answer, order: data.order ?? 0 }),
+    }),
+  deleteProfilePrompt: (promptId: string) =>
+    request(`/users/me/prompts/${promptId}`, { method: 'DELETE' }),
+  addOrUpdatePrompt: (question: string, answer: string, order = 0) =>
+    request('/users/me/prompts', {
+      method: 'POST',
+      body: JSON.stringify({ question, answer, order }),
+    }),
+  deletePrompt: (promptId: string) =>
+    request(`/users/me/prompts/${promptId}`, { method: 'DELETE' }),
+  setVoiceBio: (voiceBioUrl: string | null) =>
+    request('/users/me/voice-bio', { method: 'POST', body: JSON.stringify({ voiceBioUrl }) }),
+  getSwipeQuota: () =>
+    request<{ remaining: number; isUnlimited: boolean; totalAllowed: number }>('/swipes/quota'),
+  updateExtendedProfile: (data: any) =>
+    request('/users/me/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  submitVerification: (selfieUrl: string) =>
+    request('/safety/verify-photo', { method: 'POST', body: JSON.stringify({ selfieUrl }) }),
+  getPublicProfile: (userId: string) => request(`/users/${userId}`),
+
+  // Safety & Moderation
+  blockUser: (blockedId: string) =>
+    request('/safety/block', { method: 'POST', body: JSON.stringify({ blockedId }) }),
+  unblockUser: (userId: string) =>
+    request(`/safety/block/${userId}`, { method: 'DELETE' }),
+  getBlockedUsers: () => request('/safety/blocked'),
+  reportUser: (reportedIdOrData: string | { reportedUserId?: string; reason: string; notes?: string; details?: string }, reason?: string, details?: string) => {
+    if (typeof reportedIdOrData === 'object') {
+      return request('/safety/report', {
+        method: 'POST',
+        body: JSON.stringify({
+          reportedId: reportedIdOrData.reportedUserId,
+          reason: reportedIdOrData.reason,
+          details: reportedIdOrData.notes || reportedIdOrData.details,
+        }),
+      });
+    }
+    return request('/safety/report', {
+      method: 'POST',
+      body: JSON.stringify({ reportedId: reportedIdOrData, reason, details }),
+    });
+  },
+  verifyPhoto: (selfieUrl: string) =>
+    request('/safety/verify-photo', { method: 'POST', body: JSON.stringify({ selfieUrl }) }),
+  createSafeDate: (data: any) =>
+    request('/safety/safe-date', { method: 'POST', body: JSON.stringify(data) }),
+  getSafeDates: () => request('/safety/safe-dates'),
+  checkInSafeDate: (id: string, status: 'SAFE' | 'ALERT' = 'SAFE') =>
+    request(`/safety/safe-date/${id}/checkin`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+
+  // In-Chat Date Invites & Ephemeral
+  sendDateInvite: (matchId: string, data: any) =>
+    request(`/chat/${matchId}/date-invite`, { method: 'POST', body: JSON.stringify(data) }),
+  respondDateInvite: (matchId: string, messageId: string, response: string) =>
+    request(`/chat/${matchId}/date-invite/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ response: response.toLowerCase() }),
+    }),
+  viewEphemeralMedia: (matchId: string, messageId: string) =>
+    request(`/chat/${matchId}/ephemeral/${messageId}/view`, { method: 'POST' }),
+
+  // Notifications
+  registerPushToken: (token: string, platform = 'web') =>
+    request('/notifications/token', { method: 'POST', body: JSON.stringify({ token, platform }) }),
+  getNotifications: () => request('/notifications'),
+  markNotificationAsRead: (id: string) =>
+    request(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllNotificationsAsRead: () =>
+    request('/notifications/read-all', { method: 'PATCH' }),
+
+  // Admin Dashboard Endpoints
+  getAdminStats: () => request('/admin/stats'),
+  getAdminUsers: (search?: string, verified?: boolean, limit?: number, status?: string) => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (verified !== undefined) params.set('verified', verified.toString());
+    if (status) params.set('status', status);
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    return request(`/admin/users${query ? `?${query}` : ''}`);
+  },
+  toggleVerifyUser: (userId: string, isVerified?: boolean) =>
+    request(`/admin/users/${userId}/verify`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isVerified }),
+    }),
+  toggleBanUser: (userId: string, isBanned: boolean, banReason?: string) =>
+    request(`/admin/users/${userId}/ban`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isBanned, banReason }),
+    }),
+  deleteUser: (userId: string) =>
+    request(`/admin/users/${userId}`, { method: 'DELETE' }),
+  getAdminReports: (status?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    const query = params.toString();
+    return request(`/admin/reports${query ? `?${query}` : ''}`);
+  },
+  updateAdminReportStatus: (reportId: string, status: string) =>
+    request(`/admin/reports/${reportId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  getAdminSafeDates: () => request('/admin/safe-dates'),
+  broadcastAnnouncement: (title: string, body: string, data?: any) =>
+    request('/admin/announcement', {
+      method: 'POST',
+      body: JSON.stringify({ title, body, data }),
+    }),
+  getAdminStories: () => request('/admin/stories'),
+  deleteAdminStory: (storyId: string) =>
+    request(`/admin/stories/${storyId}`, { method: 'DELETE' }),
 };
+
 

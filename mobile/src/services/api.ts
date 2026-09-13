@@ -230,6 +230,14 @@ export const mobileApi = {
     if (data.minAge != null) payload.minAge = Number(data.minAge);
     if (data.maxAge != null) payload.maxAge = Number(data.maxAge);
     if (data.maxDistanceKm != null) payload.maxDistanceKm = Number(data.maxDistanceKm);
+    if (data.interests !== undefined) payload.interests = data.interests;
+    if (data.incognitoMode !== undefined) payload.incognitoMode = Boolean(data.incognitoMode);
+    if (data.passportActive !== undefined) payload.passportActive = Boolean(data.passportActive);
+    if (data.passportCity !== undefined) payload.passportCity = data.passportCity;
+    if (data.passportLat != null) payload.passportLat = Number(data.passportLat);
+    if (data.passportLng != null) payload.passportLng = Number(data.passportLng);
+    if (data.twoTruths !== undefined) payload.twoTruths = data.twoTruths;
+    if (data.voiceBioUrl !== undefined) payload.voiceBioUrl = data.voiceBioUrl;
 
     return await request('/users/me', {
       method: 'PUT',
@@ -238,7 +246,7 @@ export const mobileApi = {
   },
 
   // Photos
-  uploadPhoto: async (uriOrUrl: string, order = 0) => {
+  uploadPhoto: async (uriOrUrl: string, order = 0, base64Data?: string) => {
     const token = getAuthToken();
     if (!token) {
       throw new Error('Not authenticated');
@@ -256,7 +264,20 @@ export const mobileApi = {
       });
     }
 
-    // 2. Prepare FormData for Native (Android / iOS) vs Web
+    // 2. Direct Base64 upload
+    if (base64Data || uriOrUrl.startsWith('data:image')) {
+      const rawBase64 = base64Data || uriOrUrl;
+      return await request('/photos/upload-base64', {
+        method: 'POST',
+        body: JSON.stringify({
+          base64: rawBase64,
+          contentType: 'image/jpeg',
+          order,
+        }),
+      });
+    }
+
+    // 3. Prepare FormData for Native (Android / iOS) vs Web
     const formData = new FormData();
     const cleanFilename = `photo_${Date.now()}_${order}.jpg`;
 
@@ -347,7 +368,7 @@ export const mobileApi = {
           name: m.otherUser?.name || 'Match',
           avatar: m.otherUser?.photos?.[0]?.url || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=600&auto=format&fit=crop',
           online: Boolean(m.otherUser?.isOnline),
-          lastActiveAt: m.otherUser?.updatedAt,
+          lastActiveAt: m.otherUser?.lastActiveAt || m.otherUser?.updatedAt,
           bio: m.otherUser?.bio || '',
           latitude: m.otherUser?.latitude,
           longitude: m.otherUser?.longitude,
@@ -416,7 +437,7 @@ export const mobileApi = {
     });
   },
 
-  uploadStoryMedia: async (imageUri: string) => {
+  uploadStoryMedia: async (imageUri: string, base64Data?: string) => {
     const token = getAuthToken();
     if (!token) throw new Error('Not authenticated');
 
@@ -425,7 +446,19 @@ export const mobileApi = {
       return { mediaUrl: imageUri, key: `story_${Date.now()}` };
     }
 
-    // 2. Prepare FormData for Native (Android / iOS) vs Web
+    // 2. Direct Base64 upload (100% reliable across Android & iOS)
+    if (base64Data || imageUri.startsWith('data:image')) {
+      const rawBase64 = base64Data || imageUri;
+      return (await request('/stories/upload-base64', {
+        method: 'POST',
+        body: JSON.stringify({
+          base64: rawBase64,
+          contentType: 'image/jpeg',
+        }),
+      })) as { mediaUrl: string; key: string };
+    }
+
+    // 3. Prepare FormData for Native (Android / iOS) vs Web
     const formData = new FormData();
     const cleanFilename = `story_${Date.now()}.jpg`;
 
@@ -490,5 +523,186 @@ export const mobileApi = {
       method: 'POST',
       body: JSON.stringify({ publicUrl, key, order }),
     });
+  },
+
+  // VIP & Swipes Extensions
+  getWhoLikedMe: async () => {
+    return await request('/swipes/who-liked-me');
+  },
+
+  boostProfile: async (durationMinutes = 30) => {
+    return await request('/swipes/boost', {
+      method: 'POST',
+      body: JSON.stringify({ durationMinutes }),
+    });
+  },
+
+  sendCompliment: async (
+    receiverId: string,
+    content: string,
+    targetType = 'profile',
+    targetId?: string,
+  ) => {
+    return await request('/swipes/compliment', {
+      method: 'POST',
+      body: JSON.stringify({ receiverId, content, targetType, targetId }),
+    });
+  },
+
+  // Discovery Modes
+  getTopPicks: async () => {
+    return await request('/discovery/top-picks');
+  },
+
+  getBlindDateQueue: async () => {
+    return await request('/discovery/blind-date');
+  },
+
+  // AI Matching & Icebreakers
+  getAiIcebreakers: async (targetUserId: string) => {
+    return await request(`/ai/icebreakers/${targetUserId}`, { method: 'POST' });
+  },
+
+  getAiCompatibility: async (targetUserId: string) => {
+    return await request(`/ai/compatibility/${targetUserId}`);
+  },
+
+  generateAiBio: async (vibe: 'funny' | 'romantic' | 'adventurous' | 'creative' = 'creative') => {
+    return await request('/ai/generate-bio', {
+      method: 'POST',
+      body: JSON.stringify({ vibe }),
+    });
+  },
+
+  setVoiceBio: async (voiceBioUrl: string | null) => {
+    return await request('/users/me/voice-bio', {
+      method: 'POST',
+      body: JSON.stringify({ voiceBioUrl }),
+    });
+  },
+
+  getSwipeQuota: async () => {
+    return await request<{ remaining: number; isUnlimited: boolean; totalAllowed: number }>('/swipes/quota');
+  },
+
+  // Profile Prompts & Extended Fields
+  addOrUpdatePrompt: async (question: string, answer: string, order = 0) => {
+    return await request('/users/me/prompts', {
+      method: 'POST',
+      body: JSON.stringify({ question, answer, order }),
+    });
+  },
+
+  deletePrompt: async (promptId: string) => {
+    return await request(`/users/me/prompts/${promptId}`, { method: 'DELETE' });
+  },
+
+  getPublicProfile: async (userId: string) => {
+    return await request(`/users/${userId}`);
+  },
+
+  // Safety & Trust
+  blockUser: async (blockedId: string) => {
+    return await request('/safety/block', {
+      method: 'POST',
+      body: JSON.stringify({ blockedId }),
+    });
+  },
+
+  unblockUser: async (userId: string) => {
+    return await request(`/safety/block/${userId}`, { method: 'DELETE' });
+  },
+
+  getBlockedUsers: async () => {
+    return await request('/safety/blocked');
+  },
+
+  reportUser: async (reportedId: string, reason: string, details?: string) => {
+    return await request('/safety/report', {
+      method: 'POST',
+      body: JSON.stringify({ reportedId, reason, details }),
+    });
+  },
+
+  verifyPhoto: async (selfieUrl: string) => {
+    return await request('/safety/verify-photo', {
+      method: 'POST',
+      body: JSON.stringify({ selfieUrl }),
+    });
+  },
+
+  createSafeDate: async (data: {
+    matchId: string;
+    contactName: string;
+    contactPhone: string;
+    locationName: string;
+    locationLat?: number;
+    locationLng?: number;
+    scheduledTime: string;
+    notes?: string;
+  }) => {
+    return await request('/safety/safe-date', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  getSafeDates: async () => {
+    return await request('/safety/safe-dates');
+  },
+
+  checkInSafeDate: async (id: string, status: 'SAFE' | 'ALERT' = 'SAFE') => {
+    return await request(`/safety/safe-date/${id}/checkin`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  // In-Chat Date Suggestion & Ephemeral Media
+  sendDateInvite: async (
+    matchId: string,
+    data: { venueName: string; address?: string; dateTime: string; notes?: string },
+  ) => {
+    return await request(`/chat/${matchId}/date-invite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  respondDateInvite: async (
+    matchId: string,
+    messageId: string,
+    response: 'accepted' | 'declined',
+  ) => {
+    return await request(`/chat/${matchId}/date-invite/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ response }),
+    });
+  },
+
+  viewEphemeralMedia: async (matchId: string, messageId: string) => {
+    return await request(`/chat/${matchId}/ephemeral/${messageId}/view`, {
+      method: 'POST',
+    });
+  },
+
+  // Notifications
+  registerPushToken: async (token: string, platform = 'expo') => {
+    return await request('/notifications/token', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform }),
+    });
+  },
+
+  getNotifications: async () => {
+    return await request('/notifications');
+  },
+
+  markNotificationAsRead: async (id: string) => {
+    return await request(`/notifications/${id}/read`, { method: 'PATCH' });
+  },
+
+  markAllNotificationsAsRead: async () => {
+    return await request('/notifications/read-all', { method: 'PATCH' });
   },
 };

@@ -38,6 +38,26 @@ export class StoriesController {
     }
   }
 
+  @Post('upload-base64')
+  async uploadStoryBase64(
+    @CurrentUser() userId: string,
+    @Body() body: { base64: string; contentType?: string },
+  ) {
+    if (!body?.base64) {
+      throw new BadRequestException('No base64 data provided');
+    }
+    try {
+      return await this.storiesService.uploadStoryBase64(
+        userId,
+        body.base64,
+        body.contentType || 'image/jpeg',
+      );
+    } catch (error: any) {
+      console.error('Story Base64 Upload Error:', error);
+      throw new InternalServerErrorException(error.message || 'Story upload failed');
+    }
+  }
+
   @Get('feed')
   getFeed(@CurrentUser() userId: string) {
     return this.storiesService.getFeed(userId);

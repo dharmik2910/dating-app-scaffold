@@ -1,4 +1,4 @@
-import { IsEnum, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export enum SwipeActionDto {
   LIKE = 'LIKE',
@@ -10,4 +10,5 @@ export enum SwipeActionDto {
 export class CreateSwipeDto {
   @IsUUID() swipedId!: string;
   @IsEnum(SwipeActionDto) action!: SwipeActionDto;
+  @IsOptional() @IsString() comment?: string;
 }

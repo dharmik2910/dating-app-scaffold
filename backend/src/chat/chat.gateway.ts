@@ -30,7 +30,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return this.lastActiveMap.get(userId) || null;
   }
 
-  // Auth on connect: client passes JWT as auth: { token }, header, or query
   handleConnection(client: Socket) {
     try {
       let token = client.handshake.auth?.token;
@@ -54,7 +53,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       client.join(`user:${userId}`);
 
-      // Track online socket count for this user
       const sockets = this.userSockets.get(userId) || new Set<string>();
       const wasOnline = sockets.size > 0;
       sockets.add(client.id);
@@ -62,7 +60,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const now = new Date();
       this.lastActiveMap.set(userId, now);
 
-      // If newly online, broadcast real-time presence change to connected clients
       if (!wasOnline) {
         this.server.emit('userStatusChanged', {
           userId,
@@ -71,7 +68,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
     } catch {
-      // Allow unauthenticated connection for now; client can authenticate via 'authenticate' event
+      // Allow connection; client can authenticate via 'authenticate' event
     }
   }
 
@@ -121,7 +118,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           const now = new Date();
           this.lastActiveMap.set(userId, now);
 
-          // Broadcast user went offline with updated lastActive timestamp
           this.server.emit('userStatusChanged', {
             userId,
             isOnline: false,
@@ -158,7 +154,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const userId = (client.data as any)?.userId;
     if (!userId || !matchId) return;
 
-    // Secure room join: verify that user is an actual participant of this match
     const isMember = await this.chatService.isParticipant(matchId, userId);
     if (isMember) {
       client.join(`match:${matchId}`);
@@ -193,22 +188,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('sendMessage')
   async onSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { matchId: string; content: string },
+    @MessageBody()
+    body: {
+      matchId: string;
+      content: string;
+      mediaUrl?: string;
+      mediaType?: string;
+      isEphemeral?: boolean;
+      metadata?: any;
+    },
   ) {
     const senderId = (client.data as any).userId;
-    if (!senderId || !body?.matchId || !body?.content?.trim()) {
+    if (!senderId || !body?.matchId) {
       return;
     }
 
     this.lastActiveMap.set(senderId, new Date());
 
-    // Save message with strict participant authorization
-    const message = await this.chatService.saveMessage(body.matchId, senderId, body.content.trim());
-    
-    // Broadcast message ONLY to the two matched users in this specific match room
+    const message = await this.chatService.saveMessage(
+      body.matchId,
+      senderId,
+      body.content || '',
+      body.mediaUrl,
+      body.mediaType || 'text',
+      Boolean(body.isEphemeral),
+      body.metadata,
+    );
+
     this.server.to(`match:${body.matchId}`).emit('newMessage', message);
 
-    // Also emit live chat notification strictly to the recipient user's private personal room
     if (message.recipientId) {
       this.server.to(`user:${message.recipientId}`).emit('chatNotification', {
         matchId: body.matchId,
@@ -217,10 +225,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         senderName: message.sender?.name || 'Someone',
         senderPhoto: message.sender?.photo || null,
         content: message.content,
+        mediaType: message.mediaType,
         sentAt: message.sentAt,
       });
     }
 
     return message;
+  }
+
+  @SubscribeMessage('respondDateInvite')
+  async onRespondDateInvite(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      matchId: string;
+      messageId: string;
+      response: 'accepted' | 'declined';
+    },
+  ) {
+    const userId = (client.data as any).userId;
+    if (!userId || !body?.matchId || !body?.messageId) return;
+
+    const updated = await this.chatService.respondDateInvite(
+      body.matchId,
+      body.messageId,
+      userId,
+      body.response,
+    );
+
+    this.server.to(`match:${body.matchId}`).emit('dateInviteUpdated', updated);
+    return updated;
   }
 }

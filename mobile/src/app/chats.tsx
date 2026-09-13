@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
+import { usePresence } from '@/context/PresenceContext';
 import { Match } from '@/constants/mockData';
 import { mobileApi } from '@/services/api';
 import { getSocket } from '@/services/socket';
@@ -21,6 +22,7 @@ import { getSocket } from '@/services/socket';
 export default function ChatsScreen() {
   const router = useRouter();
   const { handleScroll } = useTabBarVisibility();
+  const { formatUserActivity, queryPresence } = usePresence();
   const [searchQuery, setSearchQuery] = useState('');
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -37,6 +39,7 @@ export default function ChatsScreen() {
       .then((remoteMatches) => {
         if (remoteMatches) {
           setMatches(remoteMatches);
+          queryPresence(remoteMatches.map((m) => m.user?.id).filter(Boolean));
         }
       })
       .catch((err) => console.warn('Fetch matches error in chats:', err))
@@ -122,7 +125,9 @@ export default function ChatsScreen() {
         >
           {filteredMatches.length > 0 ? (
             <View style={styles.chatList}>
-              {filteredMatches.map((match) => (
+              {filteredMatches.map((match) => {
+                const activity = formatUserActivity(match.user.id, match.user.lastActiveAt, match.user.online);
+                return (
                 <TouchableOpacity
                   key={match.id}
                   style={styles.chatItem}
@@ -131,7 +136,7 @@ export default function ChatsScreen() {
                 >
                   <View style={styles.avatarContainer}>
                     <Image source={{ uri: match.user.avatar }} style={styles.chatAvatar} />
-                    {match.user.online && <View style={styles.onlineDotChat} />}
+                    {activity.isOnline && <View style={styles.onlineDotChat} />}
                   </View>
 
                   <View style={styles.chatInfo}>
@@ -175,7 +180,8 @@ export default function ChatsScreen() {
                     </View>
                   </View>
                 </TouchableOpacity>
-              ))}
+              );
+            })}
             </View>
           ) : (
             <View style={styles.emptyContainer}>

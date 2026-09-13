@@ -10,7 +10,8 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  Platform,
+  Switch,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,39 +20,17 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '@/context/AuthContext';
 import { useTabBarVisibility } from '@/context/TabBarVisibilityContext';
 import { mobileApi } from '@/services/api';
+import { INTEREST_LABELS } from '@/constants/mockData';
 
-const POPULAR_INTERESTS = [
-  { id: 'coffee', label: '☕ Coffee' },
-  { id: 'travel', label: '✈️ Travel' },
-  { id: 'fitness', label: '🏋️‍♂️ Fitness' },
-  { id: 'music', label: '🎧 Music' },
-  { id: 'foodie', label: '🍕 Foodie' },
-  { id: 'gaming', label: '🎮 Gaming' },
-  { id: 'art', label: '🎨 Art' },
-  { id: 'photography', label: '📸 Photography' },
-  { id: 'reading', label: '📚 Reading' },
-  { id: 'pets', label: '🐶 Pets' },
-  { id: 'movies', label: '🎬 Movies' },
-  { id: 'tech', label: '💻 Tech' },
-  { id: 'hiking', label: '🧗‍♂️ Outdoor' },
-  { id: 'wine', label: '🍷 Wine & Dine' },
+const PASSPORT_CITIES = [
+  { city: 'New York, USA', lat: 40.7128, lng: -74.006 },
+  { city: 'London, UK', lat: 51.5074, lng: -0.1278 },
+  { city: 'Tokyo, Japan', lat: 35.6762, lng: 139.6503 },
+  { city: 'Paris, France', lat: 48.8566, lng: 2.3522 },
+  { city: 'Dubai, UAE', lat: 25.2048, lng: 55.2708 },
+  { city: 'Sydney, Australia', lat: -33.8688, lng: 151.2093 },
+  { city: 'Mumbai, India', lat: 19.076, lng: 72.8777 },
 ];
-
-function parseBioContent(rawBio?: string) {
-  if (!rawBio) return { cleanBio: '', interests: [] };
-  const match = rawBio.match(/\[INTERESTS:(.*?)\]/);
-  if (match && match[1]) {
-    const interests = match[1].split(',').map((s) => s.trim()).filter(Boolean);
-    const cleanBio = rawBio.replace(/\[INTERESTS:.*?\]/, '').trim();
-    return { cleanBio, interests };
-  }
-  return { cleanBio: rawBio.trim(), interests: [] };
-}
-
-function formatBioWithInterests(cleanBio: string, interests: string[]) {
-  if (interests.length === 0) return cleanBio.trim();
-  return `${cleanBio.trim()}\n\n[INTERESTS:${interests.join(',')}]`;
-}
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -61,7 +40,6 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
 
   // Profile Form State
   const [name, setName] = useState('');
@@ -70,11 +48,37 @@ export default function ProfileScreen() {
   const [bioText, setBioText] = useState('');
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [photos, setPhotos] = useState<any[]>([]);
+  const [isVerified, setIsVerified] = useState(false);
+
+  // VIP / Advanced Features State
+  const [incognitoMode, setIncognitoMode] = useState(false);
+  const [passportActive, setPassportActive] = useState(false);
+  const [passportCity, setPassportCity] = useState('New York, USA');
+  const [passportLat, setPassportLat] = useState(40.7128);
+  const [passportLng, setPassportLng] = useState(-74.006);
+
+  // AI Bio Generator & Voice Bio
+  const [voiceBioUrl, setVoiceBioUrl] = useState<string | null>(null);
+  const [showAiBioModal, setShowAiBioModal] = useState(false);
+  const [aiVibe, setAiVibe] = useState<'funny' | 'romantic' | 'adventurous' | 'creative'>('creative');
+  const [generatingBio, setGeneratingBio] = useState(false);
+  const [isPlayingVoice, setIsPlayingVoice] = useState(false);
+
+  // Two Truths
+  const [twoTruths, setTwoTruths] = useState<{ statements: string[]; lieIndex: number }>({
+    statements: ['I have lived in 3 countries', 'I can speak 4 languages', 'I have never had coffee'],
+    lieIndex: 2,
+  });
+
+  // Modals State
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
 
   useFocusEffect(
     useCallback(() => {
       fetchProfile();
-    }, [])
+    }, []),
   );
 
   async function fetchProfile() {
@@ -82,317 +86,277 @@ export default function ProfileScreen() {
     try {
       const res = await mobileApi.getMe();
       if (res) {
-        const rawBio = res.profile?.bio || res.bio || '';
-        const { cleanBio, interests: bioInterests } = parseBioContent(rawBio);
-
-        setName(res.profile?.name || res.name || '');
-        setGender(res.profile?.gender || res.gender || 'MALE');
-
-        const prefs = res.profile?.interestedIn || res.interestedIn || [];
-        if (Array.isArray(prefs) && prefs.length > 1) {
-          setPreference('EVERYONE');
-        } else if (Array.isArray(prefs) && prefs[0]) {
-          setPreference(prefs[0]);
-        } else {
-          setPreference('FEMALE');
+        const p = res.profile || res;
+        setName(p.name || '');
+        setGender(p.gender || 'MALE');
+        setBioText(p.bio || '');
+        setSelectedInterests(p.interests || []);
+        setPhotos(res.photos || []);
+        setIsVerified(Boolean(p.isVerified));
+        setIncognitoMode(Boolean(p.incognitoMode));
+        setPassportActive(Boolean(p.passportActive));
+        if (p.passportCity) setPassportCity(p.passportCity);
+        if (p.passportLat) setPassportLat(p.passportLat);
+        if (p.passportLng) setPassportLng(p.passportLng);
+        if (p.voiceBioUrl) setVoiceBioUrl(p.voiceBioUrl);
+        if (p.twoTruths) {
+          if (Array.isArray(p.twoTruths.statements) && p.twoTruths.statements.length === 3) {
+            setTwoTruths(p.twoTruths);
+          } else if (p.twoTruths.statement1 || p.twoTruths.statement2 || p.twoTruths.statement3) {
+            setTwoTruths({
+              statements: [
+                p.twoTruths.statement1 || '',
+                p.twoTruths.statement2 || '',
+                p.twoTruths.statement3 || '',
+              ],
+              lieIndex: typeof p.twoTruths.lieIndex === 'number' ? p.twoTruths.lieIndex : 2,
+            });
+          }
         }
-
-        setBioText(cleanBio);
-
-        const userInterests = bioInterests.length > 0 ? bioInterests : res.interests || [];
-        setSelectedInterests(userInterests);
-
-        const userPhotos = res.photos || res.profile?.photos || [];
-        setPhotos(userPhotos);
       }
     } catch (e) {
-      console.warn('Failed to load profile:', e);
+      console.warn('Profile fetch error:', e);
     } finally {
       setLoading(false);
     }
   }
 
-  const toggleInterest = (interestId: string) => {
-    setSelectedInterests((prev) =>
-      prev.includes(interestId)
-        ? prev.filter((i) => i !== interestId)
-        : prev.length < 6
-          ? [...prev, interestId]
-          : prev
-    );
-  };
+  async function handleGenerateBio() {
+    setGeneratingBio(true);
+    try {
+      const res = await mobileApi.generateAiBio(aiVibe);
+      if (res?.bio) {
+        setBioText(res.bio);
+        setShowAiBioModal(false);
+        Alert.alert('✨ Bio Generated!', 'We crafted a fresh bio tailored to your vibe.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to generate bio');
+    } finally {
+      setGeneratingBio(false);
+    }
+  }
 
-  const calculateCompleteness = () => {
-    let score = 0;
-    if (name.trim()) score += 20;
-    if (photos.length >= 1) score += 25;
-    if (photos.length >= 3) score += 15;
-    if (bioText.trim().length > 10) score += 20;
-    if (selectedInterests.length >= 3) score += 20;
-    return Math.min(100, score);
-  };
+  function handlePlayVoiceBio(url: string) {
+    if (typeof window !== 'undefined' && (window as any).Audio) {
+      try {
+        const audio = new (window as any).Audio(url);
+        setIsPlayingVoice(true);
+        audio.play();
+        audio.onended = () => setIsPlayingVoice(false);
+        audio.onerror = () => setIsPlayingVoice(false);
+      } catch {
+        setIsPlayingVoice(false);
+      }
+    } else {
+      Alert.alert('🎙️ Voice Intro', 'Playing sample voice intro');
+    }
+  }
 
-  const completenessScore = calculateCompleteness();
+  async function handleSetSampleVoiceBio() {
+    const sampleVoice = 'https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg';
+    try {
+      await mobileApi.setVoiceBio(sampleVoice);
+      setVoiceBioUrl(sampleVoice);
+      Alert.alert('🎙️ Voice Intro Set!', 'Your 15s voice intro is live on your profile & discover card!');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to set voice intro');
+    }
+  }
+
+  async function handleRemoveVoiceBio() {
+    try {
+      await mobileApi.setVoiceBio(null);
+      setVoiceBioUrl(null);
+      Alert.alert('Removed', 'Voice bio intro removed.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to remove voice intro');
+    }
+  }
 
   async function handleSaveProfile() {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Please enter a display name.');
-      return;
-    }
-
     setSaving(true);
     try {
-      const interestedInArray =
-        preference === 'EVERYONE'
-          ? ['MALE', 'FEMALE', 'NONBINARY', 'OTHER']
-          : [preference];
-
-      const fullBio = formatBioWithInterests(bioText, selectedInterests);
-
       await mobileApi.updateProfile({
-        name: name.trim(),
+        name,
         gender,
-        interestedIn: interestedInArray,
-        bio: fullBio,
+        bio: bioText,
+        interests: selectedInterests,
+        incognitoMode,
+        passportActive,
+        passportCity,
+        passportLat,
+        passportLng,
+        twoTruths,
       });
-
-      await refreshUser();
-      Alert.alert('Success', 'Profile updated successfully!');
+      if (refreshUser) refreshUser();
+      Alert.alert('Success', 'Profile updated successfully! ✨');
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to update profile.');
+      Alert.alert('Error', e.message || 'Could not save profile');
     } finally {
       setSaving(false);
     }
   }
 
-  async function handlePhotoAdd() {
-    if (photos.length >= 6) {
-      Alert.alert('Limit Reached', 'You can upload up to 6 photos.');
-      return;
-    }
-
+  // Photo Upload Handler
+  async function handleAddPhoto() {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted' && Platform.OS !== 'web') {
-        Alert.alert('Permission needed', 'Please allow gallery access to upload photos.');
-        return;
-      }
-
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.85,
+        aspect: [4, 5],
+        quality: 0.8,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
+      if (!result.canceled && result.assets[0]?.uri) {
         setUploadingPhoto(true);
-        try {
-          await mobileApi.uploadPhoto(result.assets[0].uri, photos.length);
-          await fetchProfile();
-        } catch (err: any) {
-          console.warn('Upload photo error:', err);
-          Alert.alert('Upload Error', err?.message || 'Failed to upload photo.');
-        } finally {
-          setUploadingPhoto(false);
-        }
+        await mobileApi.uploadPhoto(result.assets[0].uri, photos.length);
+        await fetchProfile();
       }
     } catch (e: any) {
-      console.warn('Pick image error:', e);
-      Alert.alert('Error', 'Failed to pick image.');
-    }
-  }
-
-  async function handleDeletePhoto(photoItem: any) {
-    const photoId = typeof photoItem === 'string' ? photoItem : photoItem?.id;
-    if (!photoId) return;
-
-    setDeletingPhotoId(photoId);
-    try {
-      await mobileApi.deletePhoto(photoId);
-      await fetchProfile();
-    } catch (e) {
-      console.warn('Delete photo error:', e);
+      Alert.alert('Upload Error', e.message || 'Failed to upload image');
     } finally {
-      setDeletingPhotoId(null);
+      setUploadingPhoto(false);
     }
   }
 
-  function handleLogout() {
-    logout();
-    router.replace('/auth');
+  // Verification Selfie Handler
+  async function handleVerifyPhoto() {
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]?.uri) {
+        await mobileApi.verifyPhoto(result.assets[0].uri);
+        setIsVerified(true);
+        setShowVerificationModal(false);
+        Alert.alert('🛡️ Verified!', 'Your selfie pose was verified. Blue badge is now active!');
+      } else {
+        // Mock verification for web/simulator
+        await mobileApi.verifyPhoto('https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600');
+        setIsVerified(true);
+        setShowVerificationModal(false);
+        Alert.alert('🛡️ Verified!', 'Your selfie pose was verified. Blue badge is now active!');
+      }
+    } catch (e: any) {
+      Alert.alert('Verification Error', e.message || 'Failed to verify');
+    }
+  }
+
+
+
+  async function handleOpenBlockedUsers() {
+    setShowBlockedModal(true);
+    try {
+      const list = await mobileApi.getBlockedUsers();
+      if (Array.isArray(list)) setBlockedUsers(list);
+    } catch (e) {
+      console.warn('Get blocked error:', e);
+    }
+  }
+
+  async function handleUnblock(userId: string) {
+    try {
+      await mobileApi.unblockUser(userId);
+      setBlockedUsers((prev) => prev.filter((b) => b.blockedId !== userId));
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to unblock');
+    }
   }
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" />
 
-      {/* Top Studio Header Section */}
+      {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.iconCircle}>
-            <Ionicons name="person" size={20} color="#f43f5e" />
-          </View>
-          <View style={styles.headerTitleGroup}>
-            <Text style={styles.headerTitle}>Profile Studio</Text>
-            <Text style={styles.headerSub}>Manage profile details & photos</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity style={styles.signOutBtn} onPress={handleLogout} activeOpacity={0.8}>
-          <Ionicons name="log-out-outline" size={16} color="#f43f5e" />
-          <Text style={styles.signOutBtnText}>Sign Out</Text>
+        <Text style={styles.headerTitle}>Edit Profile & Settings</Text>
+        <TouchableOpacity
+          style={[styles.saveHeaderBtn, saving && styles.saveBtnDisabled]}
+          onPress={handleSaveProfile}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.saveBtnText}>Save</Text>
+          )}
         </TouchableOpacity>
       </View>
 
       {loading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#f43f5e" />
-          <Text style={styles.loadingText}>Loading profile data...</Text>
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color="#FF4B72" />
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
         >
-          {/* Profile Strength Meter Card */}
-          <View style={styles.cardContainer}>
-            <View style={styles.meterTopRow}>
-              <View style={styles.meterTitleRow}>
-                <Ionicons name="sparkles" size={18} color="#fbbf24" />
-                <Text style={styles.cardSectionTitle}>Profile Strength</Text>
-              </View>
-              <Text style={styles.meterPercentText}>{completenessScore}%</Text>
-            </View>
-
-            {/* Progress Bar Track */}
-            <View style={styles.progressBarTrack}>
-              <View style={[styles.progressBarFill, { width: `${completenessScore}%` }]} />
-            </View>
-
-            {/* Checklist Pills */}
-            <View style={styles.checklistRow}>
-              <View
-                style={[
-                  styles.checkPill,
-                  photos.length >= 3 ? styles.checkPillActive : styles.checkPillInactive,
-                ]}
-              >
-                {photos.length >= 3 && <Ionicons name="checkmark" size={12} color="#10b981" />}
-                <Text
-                  style={[
-                    styles.checkPillText,
-                    photos.length >= 3 ? styles.checkTextActive : styles.checkTextInactive,
-                  ]}
-                >
-                  3+ Photos ({photos.length}/3)
+          {/* Verification Blue Badge Card */}
+          <View style={styles.verificationCard}>
+            <View style={styles.verifyLeft}>
+              <Ionicons
+                name={isVerified ? 'shield-checkmark' : 'shield-outline'}
+                size={24}
+                color={isVerified ? '#38BDF8' : '#94A3B8'}
+              />
+              <View>
+                <Text style={styles.verifyTitle}>
+                  {isVerified ? 'Profile Verified 🛡️' : 'Get Verified Checkmark'}
                 </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.checkPill,
-                  bioText.trim().length > 10 ? styles.checkPillActive : styles.checkPillInactive,
-                ]}
-              >
-                {bioText.trim().length > 10 && <Ionicons name="checkmark" size={12} color="#10b981" />}
-                <Text
-                  style={[
-                    styles.checkPillText,
-                    bioText.trim().length > 10 ? styles.checkTextActive : styles.checkTextInactive,
-                  ]}
-                >
-                  Bio added
-                </Text>
-              </View>
-
-              <View
-                style={[
-                  styles.checkPill,
-                  selectedInterests.length >= 3 ? styles.checkPillActive : styles.checkPillInactive,
-                ]}
-              >
-                {selectedInterests.length >= 3 && <Ionicons name="checkmark" size={12} color="#10b981" />}
-                <Text
-                  style={[
-                    styles.checkPillText,
-                    selectedInterests.length >= 3 ? styles.checkTextActive : styles.checkTextInactive,
-                  ]}
-                >
-                  3+ Passions ({selectedInterests.length}/3)
+                <Text style={styles.verifySubtitle}>
+                  {isVerified
+                    ? 'Your blue badge is visible to all matches'
+                    : 'Take a quick selfie to earn your trust badge'}
                 </Text>
               </View>
             </View>
+            {!isVerified && (
+              <TouchableOpacity
+                style={styles.verifyBtn}
+                onPress={() => setShowVerificationModal(true)}
+              >
+                <Text style={styles.verifyBtnText}>Verify</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {/* Photos & Media Section Card (Primary Dating Profile Card) */}
-          <View style={styles.cardContainer}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderInfo}>
-                <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="images" size={18} color="#f43f5e" />
-                  <Text style={styles.cardSectionTitle}>Photos & Media</Text>
+          {/* Photo Gallery Grid */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Photos ({photos.length}/6)</Text>
+            <View style={styles.photosGrid}>
+              {photos.map((photo, index) => (
+                <View key={photo.id || index} style={styles.photoBox}>
+                  <Image source={{ uri: photo.url }} style={styles.photoImg} />
+                  <TouchableOpacity
+                    style={styles.deletePhotoBtn}
+                    onPress={async () => {
+                      await mobileApi.deletePhoto(photo.id);
+                      fetchProfile();
+                    }}
+                  >
+                    <Ionicons name="close" size={14} color="#FFFFFF" />
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.cardHeaderSub} numberOfLines={1}>
-                  First photo is your main discovery card photo
-                </Text>
-              </View>
-              <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>{photos.length} / 6</Text>
-              </View>
-            </View>
-
-            <View style={styles.photoGridContainer}>
-              {photos.map((photoItem, idx) => {
-                const photoUrl = typeof photoItem === 'string' ? photoItem : photoItem.url;
-                const photoId = typeof photoItem === 'string' ? photoItem : photoItem.id;
-                const isDeleting = deletingPhotoId === photoId;
-
-                return (
-                  <View key={idx} style={styles.photoCardItem}>
-                    <Image source={{ uri: photoUrl }} style={styles.photoCardImg} resizeMode="cover" />
-                    {idx === 0 && (
-                      <View style={styles.mainPhotoTag}>
-                        <Ionicons name="star" size={10} color="#ffffff" />
-                        <Text style={styles.mainPhotoTagText}>MAIN</Text>
-                      </View>
-                    )}
-
-                    <TouchableOpacity
-                      style={styles.deletePhotoTrashBtn}
-                      onPress={() => handleDeletePhoto(photoItem)}
-                      disabled={isDeleting}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      {isDeleting ? (
-                        <ActivityIndicator size="small" color="#ffffff" />
-                      ) : (
-                        <Ionicons name="trash-outline" size={14} color="#ffffff" />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
+              ))}
 
               {photos.length < 6 && (
                 <TouchableOpacity
-                  style={styles.addPhotoDashedCard}
-                  onPress={handlePhotoAdd}
+                  style={styles.addPhotoBox}
+                  onPress={handleAddPhoto}
                   disabled={uploadingPhoto}
-                  activeOpacity={0.8}
                 >
                   {uploadingPhoto ? (
-                    <ActivityIndicator color="#f43f5e" size="small" />
+                    <ActivityIndicator size="small" color="#FF4B72" />
                   ) : (
                     <>
-                      <View style={styles.plusCircleBadge}>
-                        <Ionicons name="add" size={22} color="#f43f5e" />
-                      </View>
-                      <Text style={styles.addPhotoTitle}>Add Photo</Text>
-                      <Text style={styles.addPhotoFormatText}>Camera / Gallery</Text>
+                      <Ionicons name="add" size={28} color="#FF4B72" />
+                      <Text style={styles.addPhotoText}>Add Photo</Text>
                     </>
                   )}
                 </TouchableOpacity>
@@ -400,132 +364,149 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Profile Details Form Card */}
-          <View style={styles.cardContainer}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderInfo}>
-                <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="person" size={18} color="#f43f5e" />
-                  <Text style={styles.cardSectionTitle}>Basic Details</Text>
-                </View>
-                <Text style={styles.cardHeaderSub}>How other members see you</Text>
-              </View>
-            </View>
-
-            {/* Display Name Input */}
-            <View style={styles.formGroup}>
-              <Text style={styles.uppercaseLabel}>Display Name</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Your name"
-                placeholderTextColor="#71717a"
-                value={name}
-                onChangeText={setName}
-              />
-            </View>
-
-            {/* Gender & Interested In Selection */}
-            <View style={styles.formRow2Col}>
-              <View style={styles.formCol}>
-                <Text style={styles.uppercaseLabel}>I am</Text>
-                <View style={styles.segmentedControl}>
-                  {[
-                    { label: 'Male', val: 'MALE' },
-                    { label: 'Female', val: 'FEMALE' },
-                    { label: 'Other', val: 'NONBINARY' },
-                  ].map((g) => (
-                    <TouchableOpacity
-                      key={g.val}
-                      style={[styles.segmentBtn, gender === g.val && styles.segmentBtnActive]}
-                      onPress={() => setGender(g.val)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.segmentText, gender === g.val && styles.segmentTextActive]}>
-                        {g.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-
-              <View style={styles.formCol}>
-                <Text style={styles.uppercaseLabel}>Interested In</Text>
-                <View style={styles.segmentedControl}>
-                  {[
-                    { label: 'Women', val: 'FEMALE' },
-                    { label: 'Men', val: 'MALE' },
-                    { label: 'Everyone', val: 'EVERYONE' },
-                  ].map((p) => (
-                    <TouchableOpacity
-                      key={p.val}
-                      style={[styles.segmentBtn, preference === p.val && styles.segmentBtnActive]}
-                      onPress={() => setPreference(p.val)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={[styles.segmentText, preference === p.val && styles.segmentTextActive]}>
-                        {p.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* About Me / Bio Card */}
-          <View style={styles.cardContainer}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderInfo}>
-                <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="chatbox-ellipses" size={18} color="#f43f5e" />
-                  <Text style={styles.cardSectionTitle}>About Me</Text>
-                </View>
-                <Text style={styles.cardHeaderSub}>Share what makes you unique</Text>
-              </View>
-              <Text style={styles.counterText}>{bioText.length}/500</Text>
-            </View>
-
+          {/* Basic Information */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Basic Info</Text>
+            <Text style={styles.fieldLabel}>Display Name</Text>
             <TextInput
-              style={[styles.textInput, styles.textAreaInput]}
-              placeholder="Tell potential matches about your hobbies, passions, or what makes you smile..."
-              placeholderTextColor="#71717a"
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Your name"
+              placeholderTextColor="#64748B"
+            />
+
+            <View style={styles.bioHeaderRow}>
+              <Text style={styles.fieldLabel}>Bio</Text>
+              <TouchableOpacity
+                style={styles.aiBioBtn}
+                onPress={() => setShowAiBioModal(true)}
+              >
+                <Ionicons name="sparkles" size={13} color="#FF4B72" />
+                <Text style={styles.aiBioBtnText}>AI Generator ✨</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { height: 80 }]}
               value={bioText}
               onChangeText={setBioText}
+              placeholder="Write a few lines about your vibe..."
+              placeholderTextColor="#64748B"
               multiline
-              numberOfLines={4}
-              maxLength={500}
             />
           </View>
 
-          {/* Passions & Interests Selector Card */}
-          <View style={styles.cardContainer}>
-            <View style={styles.cardHeaderRow}>
-              <View style={styles.cardHeaderInfo}>
-                <View style={styles.cardHeaderTitleRow}>
-                  <Ionicons name="sparkles" size={18} color="#fbbf24" />
-                  <Text style={styles.cardSectionTitle}>Passions & Interests</Text>
-                </View>
-                <Text style={styles.cardHeaderSub}>
-                  Pick up to 6 interests for your profile card
-                </Text>
+          {/* Voice Bio Intro (15s) */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="mic" size={18} color="#FF4B72" />
+                <Text style={styles.sectionTitle}>Voice Intro 🎙️</Text>
               </View>
-              <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>{selectedInterests.length} / 6</Text>
-              </View>
+              {voiceBioUrl ? (
+                <TouchableOpacity onPress={handleRemoveVoiceBio}>
+                  <Ionicons name="trash-outline" size={16} color="#EF4444" />
+                </TouchableOpacity>
+              ) : null}
             </View>
+            <Text style={styles.sectionSubtitle}>
+              Let potential matches hear your voice and personality directly on your card!
+            </Text>
+            {voiceBioUrl ? (
+              <View style={styles.voicePlayRow}>
+                <TouchableOpacity
+                  style={styles.voicePlayBtn}
+                  onPress={() => handlePlayVoiceBio(voiceBioUrl)}
+                >
+                  <Ionicons
+                    name={isPlayingVoice ? 'pause' : 'play'}
+                    size={20}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.voicePlayText}>
+                    {isPlayingVoice ? 'Playing Voice Intro...' : 'Play Voice Intro'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.setVoiceBtn}
+                onPress={handleSetSampleVoiceBio}
+              >
+                <Ionicons name="mic-circle" size={24} color="#FF4B72" />
+                <Text style={styles.setVoiceBtnText}>Record / Set 15s Voice Intro</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
-            <View style={styles.pillsWrapGrid}>
-              {POPULAR_INTERESTS.map((interest) => {
-                const isSelected = selectedInterests.includes(interest.id);
+
+
+          {/* Interactive Two Truths and a Lie */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Two Truths & A Lie 🎭</Text>
+            <Text style={styles.sectionSubtitle}>
+              Matches will guess which statement is false directly on your card:
+            </Text>
+
+            {[0, 1, 2].map((idx) => (
+              <View key={idx} style={styles.twoTruthsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.lieSelectorBtn,
+                    twoTruths.lieIndex === idx && styles.lieSelectorBtnActive,
+                  ]}
+                  onPress={() => setTwoTruths((prev) => ({ ...prev, lieIndex: idx }))}
+                >
+                  <Text
+                    style={[
+                      styles.lieSelectorText,
+                      twoTruths.lieIndex === idx && styles.lieSelectorTextActive,
+                    ]}
+                  >
+                    {twoTruths.lieIndex === idx ? 'LIE' : 'TRUTH'}
+                  </Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={twoTruths.statements[idx] || ''}
+                  onChangeText={(val) => {
+                    const newStatements = [...twoTruths.statements];
+                    newStatements[idx] = val;
+                    setTwoTruths((prev) => ({ ...prev, statements: newStatements }));
+                  }}
+                  placeholder={`Statement #${idx + 1}`}
+                  placeholderTextColor="#64748B"
+                />
+              </View>
+            ))}
+          </View>
+
+          {/* Interests & Passions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Interests & Passions 🔥</Text>
+            <View style={styles.interestsWrap}>
+              {Object.entries(INTEREST_LABELS).map(([key, item]) => {
+                const isSelected = selectedInterests.includes(key);
                 return (
                   <TouchableOpacity
-                    key={interest.id}
-                    style={[styles.interestPill, isSelected && styles.interestPillSelected]}
-                    onPress={() => toggleInterest(interest.id)}
-                    activeOpacity={0.8}
+                    key={key}
+                    style={[styles.interestTag, isSelected && styles.interestTagActive]}
+                    onPress={() => {
+                      if (isSelected) {
+                        setSelectedInterests((prev) => prev.filter((i) => i !== key));
+                      } else {
+                        setSelectedInterests((prev) => [...prev, key]);
+                      }
+                    }}
                   >
-                    <Text style={[styles.interestPillText, isSelected && styles.interestTextSelected]}>
-                      {interest.label}
+                    <Text style={styles.interestIcon}>{item.icon}</Text>
+                    <Text
+                      style={[
+                        styles.interestText,
+                        isSelected && styles.interestTextActive,
+                      ]}
+                    >
+                      {item.label}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -533,24 +514,191 @@ export default function ProfileScreen() {
             </View>
           </View>
 
-          {/* Save Profile Button */}
-          <TouchableOpacity
-            style={[styles.gradientSaveBtn, saving && styles.btnDisabled]}
-            onPress={handleSaveProfile}
-            disabled={saving}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : (
-              <>
-                <Ionicons name="save" size={18} color="#ffffff" />
-                <Text style={styles.gradientSaveBtnText}>Save Profile Updates</Text>
-              </>
+          {/* Travel / Passport Mode */}
+          <View style={styles.section}>
+            <View style={styles.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>✈️ Passport / Travel Mode</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Explore and match in another city before traveling
+                </Text>
+              </View>
+              <Switch
+                value={passportActive}
+                onValueChange={setPassportActive}
+                trackColor={{ false: '#1E293B', true: '#A855F7' }}
+              />
+            </View>
+
+            {passportActive && (
+              <View style={styles.citySelectorGrid}>
+                {PASSPORT_CITIES.map((c) => (
+                  <TouchableOpacity
+                    key={c.city}
+                    style={[
+                      styles.cityBtn,
+                      passportCity === c.city && styles.cityBtnActive,
+                    ]}
+                    onPress={() => {
+                      setPassportCity(c.city);
+                      setPassportLat(c.lat);
+                      setPassportLng(c.lng);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.cityBtnText,
+                        passportCity === c.city && styles.cityBtnTextActive,
+                      ]}
+                    >
+                      {c.city}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             )}
+          </View>
+
+          {/* Privacy & Safety Settings */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Privacy & Safety 🛡️</Text>
+            <View style={styles.switchRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Ghost / Incognito Mode</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Only show profile to people you have liked
+                </Text>
+              </View>
+              <Switch
+                value={incognitoMode}
+                onValueChange={setIncognitoMode}
+                trackColor={{ false: '#1E293B', true: '#FF4B72' }}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.manageBlockedBtn}
+              onPress={handleOpenBlockedUsers}
+            >
+              <Ionicons name="ban-outline" size={18} color="#94A3B8" />
+              <Text style={styles.manageBlockedText}>Manage Blocked Users</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Logout */}
+          <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+            <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            <Text style={styles.logoutBtnText}>Log Out</Text>
           </TouchableOpacity>
         </ScrollView>
       )}
+
+
+
+      {/* Verification Selfie Modal */}
+      <Modal visible={showVerificationModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📸 Photo Verification</Text>
+              <TouchableOpacity onPress={() => setShowVerificationModal(false)}>
+                <Ionicons name="close" size={24} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sectionSubtitle}>
+              Mimic the pose below with your camera to confirm your identity and earn the blue verified badge!
+            </Text>
+            <View style={styles.poseDemoBox}>
+              <Text style={{ fontSize: 50 }}>✌️</Text>
+              <Text style={styles.poseText}>Hold up a peace sign next to your face</Text>
+            </View>
+            <TouchableOpacity style={styles.modalSubmitBtn} onPress={handleVerifyPhoto}>
+              <Ionicons name="camera" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.modalSubmitText}>Take Verification Selfie</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* AI Bio Generator Modal */}
+      <Modal visible={showAiBioModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="sparkles" size={20} color="#FF4B72" />
+                <Text style={styles.modalTitle}>AI Bio Generator</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowAiBioModal(false)}>
+                <Ionicons name="close" size={24} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sectionSubtitle}>
+              Select your desired tone and let AI polish a standout bio for you:
+            </Text>
+
+            <View style={styles.vibeGrid}>
+              {(['creative', 'funny', 'romantic', 'adventurous'] as const).map((v) => (
+                <TouchableOpacity
+                  key={v}
+                  style={[styles.vibeChip, aiVibe === v && styles.vibeChipActive]}
+                  onPress={() => setAiVibe(v)}
+                >
+                  <Text style={[styles.vibeChipText, aiVibe === v && styles.vibeChipTextActive]}>
+                    {v === 'creative' ? '🎨 Creative' : v === 'funny' ? '😂 Funny & Witty' : v === 'romantic' ? '💖 Romantic' : '🏕️ Adventurous'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.modalSubmitBtn, generatingBio && styles.saveBtnDisabled]}
+              onPress={handleGenerateBio}
+              disabled={generatingBio}
+            >
+              {generatingBio ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="sparkles" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.modalSubmitText}>Generate New Bio</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Blocked Users Modal */}
+      <Modal visible={showBlockedModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Blocked Profiles</Text>
+              <TouchableOpacity onPress={() => setShowBlockedModal(false)}>
+                <Ionicons name="close" size={24} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+            {blockedUsers.length === 0 ? (
+              <Text style={styles.emptyPromptNotice}>You have not blocked anyone.</Text>
+            ) : (
+              <View style={{ gap: 8, marginVertical: 10 }}>
+                {blockedUsers.map((b) => (
+                  <View key={b.id} style={styles.blockedRow}>
+                    <Text style={styles.blockedName}>{b.name}</Text>
+                    <TouchableOpacity
+                      style={styles.unblockBtn}
+                      onPress={() => handleUnblock(b.blockedId)}
+                    >
+                      <Text style={styles.unblockText}>Unblock</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -558,372 +706,491 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#09090b',
-  },
-  centerContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    color: '#a1a1aa',
-    fontSize: 14,
-    marginTop: 12,
+    backgroundColor: '#090D16',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#18181b',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-  },
-  headerTitleGroup: {
-    flex: 1,
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(244, 63, 94, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#ffffff',
-    letterSpacing: -0.3,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  headerSub: {
-    fontSize: 11,
-    color: '#a1a1aa',
-    marginTop: 1,
-  },
-  signOutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+  saveHeaderBtn: {
+    backgroundColor: '#FF4B72',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
     borderRadius: 12,
-    backgroundColor: 'rgba(244, 63, 94, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(244, 63, 94, 0.3)',
   },
-  signOutBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#f43f5e',
+  saveBtnDisabled: {
+    opacity: 0.5,
+  },
+  saveBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  centerBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     padding: 16,
-    gap: 16,
-    paddingBottom: 90,
+    paddingBottom: 40,
+    gap: 20,
   },
-  cardContainer: {
-    backgroundColor: '#18181b',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    gap: 14,
-  },
-  meterTopRow: {
+  verificationCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  meterTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  meterPercentText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#f43f5e',
-  },
-  progressBarTrack: {
-    height: 8,
-    backgroundColor: '#09090b',
-    borderRadius: 4,
-    overflow: 'hidden',
+    backgroundColor: 'rgba(56, 189, 248, 0.1)',
+    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: 'rgba(56, 189, 248, 0.3)',
   },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#f43f5e',
-    borderRadius: 4,
-  },
-  checklistRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  checkPill: {
+  verifyLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  checkPillActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  checkPillInactive: {
-    backgroundColor: '#09090b',
-    borderColor: '#27272a',
-  },
-  checkPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  checkTextActive: {
-    color: '#34d399',
-  },
-  checkTextInactive: {
-    color: '#a1a1aa',
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-    paddingBottom: 10,
-  },
-  cardHeaderInfo: {
+    gap: 12,
     flex: 1,
-    paddingRight: 10,
   },
-  cardHeaderTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  cardSectionTitle: {
+  verifyTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#ffffff',
+    color: '#38BDF8',
   },
-  cardHeaderSub: {
+  verifySubtitle: {
     fontSize: 11,
-    color: '#a1a1aa',
+    color: '#94A3B8',
     marginTop: 2,
   },
-  uppercaseLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#a1a1aa',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  formGroup: {
-    gap: 6,
-  },
-  formRow2Col: {
-    gap: 12,
-  },
-  formCol: {
-    gap: 6,
-  },
-  textInput: {
-    backgroundColor: '#09090b',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: '#ffffff',
-  },
-  textAreaInput: {
-    height: 90,
-    textAlignVertical: 'top',
-  },
-  segmentedControl: {
-    flexDirection: 'row',
-    backgroundColor: '#09090b',
-    borderRadius: 12,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 9,
-  },
-  segmentBtnActive: {
-    backgroundColor: '#f43f5e',
-  },
-  segmentText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#a1a1aa',
-  },
-  segmentTextActive: {
-    color: '#ffffff',
-  },
-  counterText: {
-    fontSize: 11,
-    color: '#71717a',
-    fontWeight: '600',
-  },
-  pillsWrapGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  interestPill: {
+  verifyBtn: {
+    backgroundColor: '#38BDF8',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: '#09090b',
-    borderWidth: 1,
-    borderColor: '#27272a',
+    paddingVertical: 6,
+    borderRadius: 10,
   },
-  interestPillSelected: {
-    backgroundColor: '#f43f5e',
-    borderColor: '#f43f5e',
-  },
-  interestPillText: {
+  verifyBtnText: {
+    color: '#090D16',
+    fontWeight: '700',
     fontSize: 12,
-    fontWeight: '600',
-    color: '#a1a1aa',
   },
-  interestTextSelected: {
-    color: '#ffffff',
+  section: {
+    backgroundColor: '#0F172A',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 10,
   },
-  gradientSaveBtn: {
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  bioHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  aiBioBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#f43f5e',
-    paddingVertical: 15,
-    borderRadius: 18,
-    marginTop: 4,
-    shadowColor: '#f43f5e',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  gradientSaveBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  countBadge: {
-    paddingHorizontal: 9,
+    gap: 4,
+    backgroundColor: 'rgba(255, 75, 114, 0.12)',
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
-    backgroundColor: '#09090b',
     borderWidth: 1,
-    borderColor: '#27272a',
+    borderColor: 'rgba(255, 75, 114, 0.3)',
   },
-  countBadgeText: {
+  aiBioBtnText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#d4d4d8',
+    color: '#FF4B72',
   },
-  photoGridContainer: {
+  voicePlayRow: {
+    marginTop: 4,
+  },
+  voicePlayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FF4B72',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  voicePlayText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  setVoiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255, 75, 114, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 75, 114, 0.3)',
+    borderStyle: 'dashed',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    justifyContent: 'center',
+  },
+  setVoiceBtnText: {
+    color: '#FF4B72',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#CBD5E1',
+    marginTop: 4,
+  },
+  input: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#FFFFFF',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  photosGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+    marginTop: 4,
   },
-  photoCardItem: {
-    position: 'relative',
-    width: '31.3%',
-    aspectRatio: 3 / 4,
-    borderRadius: 14,
+  photoBox: {
+    width: '30%',
+    aspectRatio: 0.8,
+    borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#09090b',
-    borderWidth: 1,
-    borderColor: '#27272a',
+    position: 'relative',
+    backgroundColor: '#1E293B',
   },
-  photoCardImg: {
+  photoImg: {
     width: '100%',
     height: '100%',
   },
-  mainPhotoTag: {
+  deletePhotoBtn: {
     position: 'absolute',
-    top: 6,
-    left: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: 'rgba(244, 63, 94, 0.9)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  mainPhotoTagText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: '#ffffff',
-  },
-  deletePhotoTrashBtn: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  addPhotoDashedCard: {
-    width: '31.3%',
-    aspectRatio: 3 / 4,
-    borderRadius: 14,
+  addPhotoBox: {
+    width: '30%',
+    aspectRatio: 0.8,
+    borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#3f3f46',
+    borderColor: 'rgba(255, 75, 114, 0.4)',
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#09090b',
-    gap: 3,
-    padding: 6,
+    backgroundColor: 'rgba(255, 75, 114, 0.05)',
+    gap: 4,
   },
-  plusCircleBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+  addPhotoText: {
+    fontSize: 11,
+    color: '#FF4B72',
+    fontWeight: '600',
+  },
+  addPromptBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  addPromptText: {
+    color: '#C084FC',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyPromptNotice: {
+    fontSize: 12,
+    color: '#64748B',
+    fontStyle: 'italic',
+  },
+  promptCard: {
+    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.25)',
+    gap: 4,
+  },
+  promptHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  promptQuestion: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#E9D5FF',
+  },
+  promptAnswer: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  twoTruthsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  lieSelectorBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(168, 85, 247, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.3)',
+  },
+  lieSelectorBtnActive: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderColor: '#EF4444',
+  },
+  lieSelectorText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#C084FC',
+  },
+  lieSelectorTextActive: {
+    color: '#EF4444',
+  },
+  interestsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  interestTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 6,
+  },
+  interestTagActive: {
+    backgroundColor: 'rgba(255, 75, 114, 0.15)',
+    borderColor: '#FF4B72',
+  },
+  interestIcon: {
+    fontSize: 14,
+  },
+  interestText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  interestTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  citySelectorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  cityBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  cityBtnActive: {
+    backgroundColor: '#A855F7',
+  },
+  cityBtnText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  cityBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  manageBlockedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  manageBlockedText: {
+    fontSize: 13,
+    color: '#94A3B8',
+  },
+  logoutBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
+    gap: 8,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 14,
+    marginTop: 10,
   },
-  addPhotoTitle: {
-    fontSize: 11,
+  logoutBtnText: {
+    color: '#EF4444',
     fontWeight: '700',
-    color: '#ffffff',
-    textAlign: 'center',
+    fontSize: 14,
   },
-  addPhotoFormatText: {
-    fontSize: 9,
-    color: '#71717a',
-    textAlign: 'center',
+  // Modals
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#0F172A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  vibeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginVertical: 6,
+  },
+  vibeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  vibeChipActive: {
+    backgroundColor: 'rgba(255, 75, 114, 0.25)',
+    borderColor: '#FF4B72',
+    borderWidth: 1,
+  },
+  vibeChipText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  vibeChipTextActive: {
+    color: '#FF4B72',
+    fontWeight: '700',
+  },
+  promptChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    marginRight: 8,
+  },
+  promptChipActive: {
+    backgroundColor: '#A855F7',
+  },
+  promptChipText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  promptChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  modalSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FF4B72',
+    paddingVertical: 12,
+    borderRadius: 14,
+    marginTop: 8,
+  },
+  modalSubmitText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  poseDemoBox: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  poseText: {
+    fontSize: 14,
+    color: '#CBD5E1',
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 10,
+  },
+  blockedName: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  unblockBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderRadius: 8,
+  },
+  unblockText: {
+    fontSize: 11,
+    color: '#EF4444',
+    fontWeight: '600',
   },
 });

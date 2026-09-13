@@ -13,7 +13,14 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const secret = process.env.JWT_SECRET || 'change-me';
       const payload = this.jwt.verify(authHeader.split(' ')[1], { secret });
-      req.userId = payload.sub;
+      const userId = payload.sub || payload.id || payload.userId;
+      req.userId = userId;
+      req.user = {
+        id: userId,
+        userId: userId,
+        phone: payload.phone,
+        ...(typeof payload === 'object' ? payload : {}),
+      };
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');

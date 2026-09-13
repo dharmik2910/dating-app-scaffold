@@ -8,7 +8,6 @@ import { DiscoveryService } from './discovery.service';
 export class DiscoveryController {
   constructor(private discoveryService: DiscoveryService) {}
 
-  // Returns a paginated batch of candidate profiles.
   @Get()
   getCandidates(
     @CurrentUser() userId: string,
@@ -17,5 +16,15 @@ export class DiscoveryController {
     @Query('q') query?: string,
   ) {
     return this.discoveryService.getCandidates(userId, cursor, limit, query);
+  }
+
+  @Get('top-picks')
+  getTopPicks(@CurrentUser() userId: string) {
+    return this.discoveryService.getTopPicks(userId);
+  }
+
+  @Get('blind-date')
+  getBlindDateQueue(@CurrentUser() userId: string) {
+    return this.discoveryService.getBlindDateQueue(userId);
   }
 }

@@ -3,7 +3,6 @@ import {
   StyleSheet,
   View,
   Text,
-  Image,
   TouchableOpacity,
   TextInput,
   Modal,
@@ -12,6 +11,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,6 +36,7 @@ export default function StoryUploadModal({
   onStoryUploaded,
 }: StoryUploadModalProps) {
   const [selectedUri, setSelectedUri] = useState<string | null>(null);
+  const [selectedBase64, setSelectedBase64] = useState<string | null>(null);
   const [caption, setCaption] = useState<string>('');
   const [uploading, setUploading] = useState<boolean>(false);
 
@@ -52,10 +53,14 @@ export default function StoryUploadModal({
         allowsEditing: true,
         aspect: [9, 16],
         quality: 0.85,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setSelectedUri(result.assets[0].uri);
+        if (result.assets[0].base64) {
+          setSelectedBase64(result.assets[0].base64);
+        }
       }
     } catch (e: any) {
       console.warn('Pick image error:', e);
@@ -75,10 +80,14 @@ export default function StoryUploadModal({
         allowsEditing: true,
         aspect: [9, 16],
         quality: 0.85,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setSelectedUri(result.assets[0].uri);
+        if (result.assets[0].base64) {
+          setSelectedBase64(result.assets[0].base64);
+        }
       }
     } catch (e: any) {
       console.warn('Take photo error:', e);
@@ -94,7 +103,7 @@ export default function StoryUploadModal({
 
     setUploading(true);
     try {
-      const uploadRes = await mobileApi.uploadStoryMedia(selectedUri);
+      const uploadRes = await mobileApi.uploadStoryMedia(selectedUri, selectedBase64 || undefined);
       const mediaUrl = uploadRes?.mediaUrl || selectedUri;
 
       await mobileApi.createStory(mediaUrl, 'image', caption.trim());
@@ -132,10 +141,13 @@ export default function StoryUploadModal({
           {/* Media Preview Box */}
           {selectedUri ? (
             <View style={styles.previewContainer}>
-              <Image source={{ uri: selectedUri }} style={styles.previewImage} resizeMode="cover" />
+              <Image source={{ uri: selectedUri }} style={styles.previewImage} contentFit="cover" transition={200} />
               <TouchableOpacity
                 style={styles.changePhotoBtn}
-                onPress={() => setSelectedUri(null)}
+                onPress={() => {
+                  setSelectedUri(null);
+                  setSelectedBase64(null);
+                }}
                 disabled={uploading}
               >
                 <Ionicons name="trash-outline" size={18} color="#ffffff" />

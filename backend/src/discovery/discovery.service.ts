@@ -1,29 +1,65 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChatGateway } from '../chat/chat.gateway';
 
 @Injectable()
 export class DiscoveryService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => ChatGateway))
+    private chatGateway: ChatGateway,
+  ) {}
 
-  async getCandidates(userId: string, cursor?: string, limitStr?: string, query?: string) {
+  async getCandidates(
+    userId: string,
+    cursor?: string,
+    limitStr?: string,
+    query?: string,
+  ) {
     const limit = Math.min(Math.max(parseInt(limitStr || '15', 10) || 15, 1), 50);
 
-    const swiped = await this.prisma.swipe.findMany({
-      where: { swiperId: userId },
-      select: { swipedId: true, action: true },
-    });
-    const likedSet = new Set(
-      swiped.filter((s) => s.action === 'LIKE' || s.action === 'SUPERLIKE').map((s) => s.swipedId)
-    );
+    // 1. Fetch user's swipes and blocks
+    const [swiped, myBlocks, blocksOnMe] = await Promise.all([
+      this.prisma.swipe.findMany({
+        where: { swiperId: userId },
+        select: { swipedId: true, action: true },
+      }),
+      this.prisma.block.findMany({
+        where: { blockerId: userId },
+        select: { blockedId: true },
+      }),
+      this.prisma.block.findMany({
+        where: { blockedId: userId },
+        select: { blockerId: true },
+      }),
+    ]);
 
-    const me = await this.prisma.profile.findUnique({ where: { userId } });
-    const meLat = me?.latitude ?? 0;
-    const meLng = me?.longitude ?? 0;
+    const blockedSet = new Set([
+      ...myBlocks.map((b) => b.blockedId),
+      ...blocksOnMe.map((b) => b.blockerId),
+    ]);
+
+    const swipedUserIds = new Set(swiped.map((s) => s.swipedId));
+    const excludedUserIds = Array.from(blockedSet);
+
+    // 2. Fetch current user profile (with passport check)
+    const me = await this.prisma.profile.findUnique({
+      where: { userId },
+      include: { prompts: true },
+    });
+
+    const usePassport = me?.passportActive && me?.passportLat && me?.passportLng;
+    const meLat = usePassport ? (me.passportLat as number) : me?.latitude ?? 0;
+    const meLng = usePassport ? (me.passportLng as number) : me?.longitude ?? 0;
 
     const trimmedQuery = query?.trim();
     const whereClause: any = {
       userId: {
         not: userId,
+        notIn: excludedUserIds,
+      },
+      user: {
+        isBanned: false,
       },
     };
 
@@ -37,25 +73,39 @@ export class DiscoveryService {
     const profiles = await this.prisma.profile.findMany({
       where: whereClause,
       include: {
+        prompts: { orderBy: { order: 'asc' } },
         user: {
           include: {
             photos: {
               orderBy: { order: 'asc' },
               take: 6,
             },
+            swipesGiven: {
+              where: { swipedId: userId, action: { in: ['LIKE', 'SUPERLIKE'] } },
+            },
           },
         },
       },
-      take: limit + 1,
+      take: limit + 10, // extra to filter incognito
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ boostedUntil: 'desc' }, { updatedAt: 'desc' }],
     });
 
-    const hasMore = profiles.length > limit;
-    const rawItems = hasMore ? profiles.slice(0, limit) : profiles;
-    const nextCursor = hasMore && rawItems.length > 0 ? rawItems[rawItems.length - 1].id : null;
+    // 3. Obey Incognito mode: if profile has incognitoMode=true, only show if they swiped right on me
+    const visibleProfiles = profiles.filter((p) => {
+      if (p.incognitoMode) {
+        return p.user.swipesGiven.length > 0;
+      }
+      return true;
+    });
 
+    const hasMore = visibleProfiles.length > limit;
+    const rawItems = hasMore ? visibleProfiles.slice(0, limit) : visibleProfiles;
+    const nextCursor =
+      hasMore && rawItems.length > 0 ? rawItems[rawItems.length - 1].id : null;
+
+    const now = new Date();
     const items = rawItems.map((p) => {
       let distanceKm = 0;
       if (meLat && meLng && p.latitude && p.longitude) {
@@ -73,6 +123,12 @@ export class DiscoveryService {
         distanceKm = Math.round(dist * 10) / 10;
       }
 
+      const isOnline = this.chatGateway ? this.chatGateway.isUserOnline(p.userId) : false;
+      const liveLastActive = this.chatGateway
+        ? this.chatGateway.getLastActive(p.userId)
+        : null;
+      const isBoosted = Boolean(p.boostedUntil && new Date(p.boostedUntil) > now);
+
       return {
         id: p.id,
         userId: p.userId,
@@ -82,11 +138,17 @@ export class DiscoveryService {
         latitude: p.latitude,
         longitude: p.longitude,
         distance_km: distanceKm,
-        liked: likedSet.has(p.userId),
+        liked: swipedUserIds.has(p.userId),
         photos: p.user.photos || [],
-        lastActiveAt: p.updatedAt,
+        isVerified: p.isVerified,
+        interests: p.interests || [],
+        voiceBioUrl: p.voiceBioUrl || null,
+        twoTruths: p.twoTruths || null,
+        prompts: p.prompts || [],
+        isBoosted,
+        isOnline,
+        lastActiveAt: liveLastActive ? liveLastActive.toISOString() : p.updatedAt,
       };
-
     });
 
     return {
@@ -95,8 +157,30 @@ export class DiscoveryService {
       hasMore,
     };
   }
+
+  async getTopPicks(userId: string) {
+    const candidates = await this.getCandidates(userId, undefined, '8');
+    return candidates.items.map((item, idx) => ({
+      ...item,
+      topPickReason:
+        idx === 0
+          ? '🌟 96% Match • Shared Passions'
+          : idx === 1
+          ? '🔥 Trending Today • High Chemistry'
+          : idx === 2
+          ? '🛡️ Verified Active • Great Conversationalist'
+          : '✨ Curated for You',
+    }));
+  }
+
+  async getBlindDateQueue(userId: string) {
+    const candidates = await this.getCandidates(userId, undefined, '6');
+    return candidates.items.map((item) => ({
+      ...item,
+      blindMode: true,
+      hint: `${item.gender === 'female' ? 'Woman' : 'Man'} • Loves ${
+        (item.interests && item.interests[0]) || 'Music & Travel'
+      }`,
+    }));
+  }
 }
-
-
-
-

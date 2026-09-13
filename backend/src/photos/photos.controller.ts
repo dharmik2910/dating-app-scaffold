@@ -38,6 +38,31 @@ export class PhotosController {
     }
   }
 
+  // Direct backend base64 upload route
+  @Post('upload-base64')
+  async uploadBase64(
+    @CurrentUser() userId: string,
+    @Body() body: { base64: string; contentType?: string; order?: number },
+  ) {
+    if (!body?.base64) {
+      throw new BadRequestException('No base64 data provided');
+    }
+    try {
+      return await this.photosService.uploadBase64(
+        userId,
+        body.base64,
+        body.contentType || 'image/jpeg',
+        body.order || 0,
+      );
+    } catch (error: any) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      console.error('Photo Base64 Upload Error:', error);
+      throw new InternalServerErrorException(error.message || 'Photo upload failed');
+    }
+  }
+
 
 
   // Step 2: after the client PUTs the file to S3, confirm it so we save a Photo row.

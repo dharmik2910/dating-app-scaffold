@@ -57,23 +57,32 @@ npx expo start
   delivery/verification itself) → sends the Firebase ID token to
   `POST /auth/verify` → backend verifies it with firebase-admin and issues its
   own JWT access/refresh token pair.
-- **Discovery**: raw-SQL haversine distance query filtered by gender
-  preference, age range, and already-swiped users. Swap for PostGIS
-  `ST_DWithin` once you enable the extension for better index performance at
-  scale.
-- **Swipes/Matches**: swiping "like" checks for a reciprocal like and creates
-  a `Match` row if found.
-- **Chat**: Socket.IO gateway authenticated via JWT on connection; messages
-  persist to Postgres and broadcast to both users in the match room.
-- **Photos**: signed-URL upload flow — backend generates a presigned S3 PUT
-  URL, client uploads directly to S3, then confirms so a `Photo` row is saved.
+- **Discovery**: Geo-distance & haversine query with passport mode, filters, chemistry scoring, two truths and a lie mini-games, and live online presence.
+- **Swipes/Matches**: 10-swipe daily quota with live counter, superlikes, compliments before matching, reciprocal mutual matches.
+- **Chat & Socket.IO**: Real-time messaging with typing indicators, ephemeral disappearing media, and interactive in-chat date invites.
+- **Safety & Moderation**: User reporting with categories (Harassment, Fake Profile/Catfish, Inappropriate Photos, Spam), user blocking, photo verification pipeline, and SafeDate emergency contact check-ins.
+- **Admin Dashboard & Moderation**:
+  - Live Overview KPIs (total users, verified profiles, active matches, pending reports, banned accounts).
+  - Reversible **Ban & Unban** system with 1-click toggling, reasons, and automatic feed restriction.
+  - Verification checkmark badge granting & revoking.
+  - Moderation queue for community violation reports.
+  - Broadcast system-wide announcements to all active users.
+- **Stories**: 24h ephemeral story feed with rich media previews and viewer analytics.
+## Mobile Active Status Troubleshooting
 
-## Not yet built (natural next steps)
+When users report that their **online/active status** does not update on mobile, check the following:
 
-- Photo moderation/verification pipeline
-- Push notifications for new matches/messages
-- Rate limiting on OTP requests and swipes
-- Report/block users
-- Admin dashboard
-- Onboarding flow UI (profile setup + photo upload screens are stubbed as
-  empty route folders: `app/(onboarding)/setup`)
+1. **Expo environment variables** – ensure `EXPO_PUBLIC_API_URL` points to the correct backend URL (e.g., `http://<host>:3001`).
+2. **Push notification permissions** – the mobile app uses a lightweight heartbeat (`POST /users/:id/heartbeat`) that runs only when the app has background permission. Verify that the permission is granted in device settings.
+3. **WebSocket connection** – the mobile client connects to the same Socket.IO namespace as the web client. Open the device console (Expo DevTools) and look for `socket.io-client` connection logs. Re‑connect if you see `disconnect` events.
+4. **Backend health** – confirm that `backend/src/users/users.service.ts`’s `setActiveStatus` method runs without errors (check the server logs for `Active status updated`).
+5. **Caching** – the mobile client caches the last status for 30 seconds. If you changed the code, clear the app cache (`expo start -c`) and reinstall the app.
+
+**Quick fix**:
+```bash
+# Restart the dev server and clear caches
+cd backend && npm run start:dev
+cd mobile && expo start -c
+```
+
+If the problem persists, open an issue with the relevant logs and the device model/OS version.

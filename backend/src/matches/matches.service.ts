@@ -1,9 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChatGateway } from '../chat/chat.gateway';
 
 @Injectable()
 export class MatchesService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => ChatGateway))
+    private chatGateway: ChatGateway,
+  ) {}
 
   async listForUser(
     userId: string,
@@ -13,21 +18,54 @@ export class MatchesService {
   ) {
     const limit = Math.min(Math.max(parseInt(limitStr || '20', 10) || 20, 1), 50);
 
-    // Get current user's active likes
-    const userSwipes = await this.prisma.swipe.findMany({
-      where: {
-        swiperId: userId,
-        action: { in: ['LIKE', 'SUPERLIKE'] },
-      },
-      select: { swipedId: true },
-    });
+    // Get current user's active likes and blocks
+    const [userSwipes, myBlocks, blocksOnMe] = await Promise.all([
+      this.prisma.swipe.findMany({
+        where: {
+          swiperId: userId,
+          action: { in: ['LIKE', 'SUPERLIKE'] },
+        },
+        select: { swipedId: true },
+      }),
+      this.prisma.block.findMany({
+        where: { blockerId: userId },
+        select: { blockedId: true },
+      }),
+      this.prisma.block.findMany({
+        where: { blockedId: userId },
+        select: { blockerId: true },
+      }),
+    ]);
+
     const activeLikedUserIds = new Set(userSwipes.map((s) => s.swipedId));
+    const blockedSet = new Set([
+      ...myBlocks.map((b) => b.blockedId),
+      ...blocksOnMe.map((b) => b.blockerId),
+    ]);
 
     const matches = await this.prisma.match.findMany({
-      where: { OR: [{ user1Id: userId }, { user2Id: userId }] },
+      where: {
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+        AND: [
+          { user1Id: { notIn: Array.from(blockedSet) } },
+          { user2Id: { notIn: Array.from(blockedSet) } },
+          { user1: { isBanned: false } },
+          { user2: { isBanned: false } },
+        ],
+      },
       include: {
-        user1: { include: { profile: true, photos: { take: 1, orderBy: { order: 'asc' } } } },
-        user2: { include: { profile: true, photos: { take: 1, orderBy: { order: 'asc' } } } },
+        user1: {
+          include: {
+            profile: { include: { prompts: true } },
+            photos: { take: 1, orderBy: { order: 'asc' } },
+          },
+        },
+        user2: {
+          include: {
+            profile: { include: { prompts: true } },
+            photos: { take: 1, orderBy: { order: 'asc' } },
+          },
+        },
         messages: { orderBy: { sentAt: 'desc' }, take: 1 },
       },
       take: limit + 1,
@@ -39,21 +77,20 @@ export class MatchesService {
     const filtered = matches.filter((m) => {
       const other = m.user1Id === userId ? m.user2 : m.user1;
       if (!other) return false;
+      if (blockedSet.has(other.id)) return false;
+
       const isActiveMatch = activeLikedUserIds.has(other.id);
       const hasChatHistory = m.messages && m.messages.length > 0;
 
       if (type === 'conversations') {
-        // Chat inbox: show active matches OR any conversation with chat messages
         return isActiveMatch || hasChatHistory;
       }
       if (type === 'matches') {
-        // Matches page: show ONLY active matches (not removed/unmatched)
         return isActiveMatch;
       }
       return true;
     });
 
-    // Sort: Most recent message sentAt (or matchedAt) on top like WhatsApp
     filtered.sort((a, b) => {
       const aTime = a.messages?.[0]?.sentAt
         ? new Date(a.messages[0].sentAt).getTime()
@@ -66,11 +103,19 @@ export class MatchesService {
 
     const hasMore = filtered.length > limit;
     const rawItems = hasMore ? filtered.slice(0, limit) : filtered;
-    const nextCursor = hasMore && rawItems.length > 0 ? rawItems[rawItems.length - 1].id : null;
+    const nextCursor =
+      hasMore && rawItems.length > 0 ? rawItems[rawItems.length - 1].id : null;
 
     const items = rawItems.map((m) => {
       const other = m.user1Id === userId ? m.user2 : m.user1;
-      const isUnmatched = !activeLikedUserIds.has(other?.id || '');
+      const otherId = other?.id || '';
+      const isUnmatched = !activeLikedUserIds.has(otherId);
+      const isOnline =
+        otherId && this.chatGateway ? this.chatGateway.isUserOnline(otherId) : false;
+      const liveLastActive =
+        otherId && this.chatGateway ? this.chatGateway.getLastActive(otherId) : null;
+      const fallbackLastActive = other?.profile?.updatedAt || other?.updatedAt;
+
       return {
         id: m.id,
         matchedAt: m.matchedAt,
@@ -81,9 +126,18 @@ export class MatchesService {
           name: other?.profile?.name || 'User',
           photos: other?.photos || [],
           bio: other?.profile?.bio,
+          isVerified: other?.profile?.isVerified || false,
+          interests: other?.profile?.interests || [],
+          voiceBioUrl: other?.profile?.voiceBioUrl || null,
+          twoTruths: other?.profile?.twoTruths || null,
+          prompts: other?.profile?.prompts || [],
           latitude: other?.profile?.latitude,
           longitude: other?.profile?.longitude,
-          updatedAt: other?.profile?.updatedAt || other?.updatedAt,
+          updatedAt: fallbackLastActive,
+          isOnline,
+          lastActiveAt: liveLastActive
+            ? liveLastActive.toISOString()
+            : fallbackLastActive,
         },
       };
     });

@@ -1,11 +1,19 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ChatService {
   constructor(private prisma: PrismaService) {}
 
-  async saveMessage(matchId: string, senderId: string, content: string) {
+  async saveMessage(
+    matchId: string,
+    senderId: string,
+    content: string,
+    mediaUrl?: string,
+    mediaType = 'text',
+    isEphemeral = false,
+    metadata?: any,
+  ) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
@@ -28,7 +36,18 @@ export class ChatService {
       throw new ForbiddenException('Not part of this match');
     }
 
-    const message = await this.prisma.message.create({ data: { matchId, senderId, content } });
+    const message = await this.prisma.message.create({
+      data: {
+        matchId,
+        senderId,
+        content,
+        mediaUrl,
+        mediaType,
+        isEphemeral,
+        metadata: metadata || null,
+      },
+    });
+
     const recipientId = match.user1Id === senderId ? match.user2Id : match.user1Id;
     const senderUser = match.user1Id === senderId ? match.user1 : match.user2;
 
@@ -44,7 +63,7 @@ export class ChatService {
   }
 
   async getHistory(matchId: string, cursor?: string, limitStr?: string) {
-    const limit = Math.min(Math.max(parseInt(limitStr || '25', 10) || 25, 1), 100);
+    const limit = Math.min(Math.max(parseInt(limitStr || '30', 10) || 30, 1), 100);
 
     const messages = await this.prisma.message.findMany({
       where: { matchId },
@@ -63,6 +82,51 @@ export class ChatService {
       nextCursor,
       hasMore,
     };
+  }
+
+  async respondDateInvite(
+    matchId: string,
+    messageId: string,
+    userId: string,
+    response: 'accepted' | 'declined',
+  ) {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message || message.matchId !== matchId) {
+      throw new NotFoundException('Date invitation not found');
+    }
+
+    const existingMeta = (message.metadata as any) || {};
+    const updatedMeta = {
+      ...existingMeta,
+      status: response,
+      respondedBy: userId,
+      respondedAt: new Date().toISOString(),
+    };
+
+    const updated = await this.prisma.message.update({
+      where: { id: messageId },
+      data: { metadata: updatedMeta },
+    });
+
+    return updated;
+  }
+
+  async viewEphemeralMedia(messageId: string, userId: string) {
+    const message = await this.prisma.message.findUnique({ where: { id: messageId } });
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    if (message.isEphemeral && !message.viewedAt && message.senderId !== userId) {
+      return this.prisma.message.update({
+        where: { id: messageId },
+        data: {
+          viewedAt: new Date(),
+        },
+      });
+    }
+
+    return message;
   }
 
   async isParticipant(matchId: string, userId: string): Promise<boolean> {

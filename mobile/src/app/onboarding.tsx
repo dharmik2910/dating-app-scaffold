@@ -389,10 +389,14 @@ export default function SetupPage() {
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.85,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets[0]?.uri) {
-        setPhotos((prev) => [...prev, { uri: result.assets[0].uri }]);
+        setPhotos((prev) => [
+          ...prev,
+          { uri: result.assets[0].uri, base64: result.assets[0].base64 || undefined },
+        ]);
       }
     } catch (e) {
       console.warn('Gallery pick fallback:', e);
@@ -414,10 +418,14 @@ export default function SetupPage() {
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.85,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets[0]?.uri) {
-        setPhotos((prev) => [...prev, { uri: result.assets[0].uri }]);
+        setPhotos((prev) => [
+          ...prev,
+          { uri: result.assets[0].uri, base64: result.assets[0].base64 || undefined },
+        ]);
       }
     } catch (e) {
       console.warn('Camera take fallback:', e);
@@ -511,7 +519,7 @@ export default function SetupPage() {
       if (!skipPhotos && photos.length > 0) {
         for (let i = 0; i < photos.length; i++) {
           try {
-            await mobileApi.uploadPhoto(photos[i].uri, i);
+            await mobileApi.uploadPhoto(photos[i].uri, i, (photos[i] as any).base64);
           } catch (uploadErr) {
             console.warn(`Photo ${i} upload warning:`, uploadErr);
           }

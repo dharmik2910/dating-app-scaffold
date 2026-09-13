@@ -7,45 +7,74 @@ datasource db {
   url        = env("DATABASE_URL")
 }
 
-generator json {
-  provider = "prisma-client-js"
-}
-
 model User {
   id            String   @id @default(uuid())
   phone         String   @unique
   firebaseUid   String   @unique
   phoneVerified Boolean  @default(true)
+  isBanned      Boolean  @default(false)
+  banReason     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  profile       Profile?
-  photos        Photo[]
-  swipesGiven   Swipe[]  @relation("SwipesGiven")
-  swipesReceived Swipe[] @relation("SwipesReceived")
-  matchesA      Match[]  @relation("MatchUser1")
-  matchesB      Match[]  @relation("MatchUser2")
-  messages      Message[]
-  stories       Story[]
-  storyViews    StoryView[]
+  profile             Profile?
+  photos              Photo[]
+  swipesGiven         Swipe[]           @relation("SwipesGiven")
+  swipesReceived      Swipe[]           @relation("SwipesReceived")
+  matchesA            Match[]           @relation("MatchUser1")
+  matchesB            Match[]           @relation("MatchUser2")
+  messages            Message[]
+  stories             Story[]
+  storyViews          StoryView[]
+  blocksSent          Block[]           @relation("BlocksSent")
+  blocksReceived      Block[]           @relation("BlocksReceived")
+  reportsSent         Report[]          @relation("ReportsSent")
+  reportsReceived     Report[]          @relation("ReportsReceived")
+  complimentsSent     Compliment[]      @relation("ComplimentsSent")
+  complimentsReceived Compliment[]      @relation("ComplimentsReceived")
+  safeDates           SafeDate[]
+  deviceTokens        DeviceToken[]
+  notifications       AppNotification[]
 }
 
 model Profile {
-  id          String   @id @default(uuid())
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  dob         DateTime
-  gender      String
-  bio         String?
-  interestedIn String[] // e.g. ["male","female"]
-  minAge      Int      @default(18)
-  maxAge      Int      @default(99)
-  maxDistanceKm Int    @default(50)
-  // Store lat/lng directly; use raw SQL for PostGIS proximity queries
-  latitude    Float?
-  longitude   Float?
-  updatedAt   DateTime @updatedAt
+  id                 String          @id @default(uuid())
+  userId             String          @unique
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name               String
+  dob                DateTime
+  gender             String
+  bio                String?
+  interestedIn       String[]        // e.g. ["male","female"]
+  minAge             Int             @default(18)
+  maxAge             Int             @default(99)
+  maxDistanceKm      Int             @default(50)
+  latitude           Float?
+  longitude          Float?
+  isVerified         Boolean         @default(false)
+  verificationSelfie String?
+  incognitoMode      Boolean         @default(false)
+  passportActive     Boolean         @default(false)
+  passportLat        Float?
+  passportLng        Float?
+  passportCity       String?
+  boostedUntil       DateTime?
+  voiceBioUrl        String?
+  twoTruths          Json?           // e.g. { statements: string[], lieIndex: number }
+  interests          String[]        @default([])
+  prompts            ProfilePrompt[]
+  updatedAt          DateTime        @updatedAt
+}
+
+model ProfilePrompt {
+  id        String   @id @default(uuid())
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  question  String
+  answer    String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Photo {
@@ -65,13 +94,14 @@ enum SwipeAction {
 }
 
 model Swipe {
-  id         String      @id @default(uuid())
-  swiperId   String
-  swiper     User        @relation("SwipesGiven", fields: [swiperId], references: [id], onDelete: Cascade)
-  swipedId   String
-  swiped     User        @relation("SwipesReceived", fields: [swipedId], references: [id], onDelete: Cascade)
-  action     SwipeAction
-  createdAt  DateTime    @default(now())
+  id        String      @id @default(uuid())
+  swiperId  String
+  swiper    User        @relation("SwipesGiven", fields: [swiperId], references: [id], onDelete: Cascade)
+  swipedId  String
+  swiped    User        @relation("SwipesReceived", fields: [swipedId], references: [id], onDelete: Cascade)
+  action    SwipeAction
+  comment   String?
+  createdAt DateTime    @default(now())
 
   @@unique([swiperId, swipedId])
 }
@@ -84,19 +114,99 @@ model Match {
   user2     User      @relation("MatchUser2", fields: [user2Id], references: [id], onDelete: Cascade)
   matchedAt DateTime  @default(now())
   messages  Message[]
+  safeDates SafeDate[]
 
   @@unique([user1Id, user2Id])
 }
 
 model Message {
+  id          String    @id @default(uuid())
+  matchId     String
+  match       Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content     String
+  mediaUrl    String?
+  mediaType   String    @default("text") // "text" | "audio" | "image" | "date_invite" | "icebreaker"
+  isEphemeral Boolean   @default(false)
+  viewedAt    DateTime?
+  metadata    Json?     // e.g. { venueName, address, dateTime, status }
+  sentAt      DateTime  @default(now())
+  readAt      DateTime?
+}
+
+model Block {
   id        String   @id @default(uuid())
-  matchId   String
-  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  senderId  String
-  sender    User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  content   String
-  sentAt    DateTime @default(now())
-  readAt    DateTime?
+  blockerId String
+  blocker   User     @relation("BlocksSent", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  reporterId String
+  reporter   User     @relation("ReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId String
+  reported   User     @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reason     String   // "harassment" | "fake_profile" | "inappropriate_photos" | "spam" | "underage" | "other"
+  details    String?
+  status     String   @default("PENDING") // "PENDING" | "REVIEWED" | "RESOLVED" | "DISMISSED"
+  createdAt  DateTime @default(now())
+}
+
+model Compliment {
+  id         String   @id @default(uuid())
+  senderId   String
+  sender     User     @relation("ComplimentsSent", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User     @relation("ComplimentsReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+  content    String
+  targetType String   @default("profile") // "photo" | "prompt" | "profile"
+  targetId   String?
+  createdAt  DateTime @default(now())
+}
+
+model SafeDate {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  matchId       String
+  match         Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  contactName   String
+  contactPhone  String
+  locationName  String
+  locationLat   Float?
+  locationLng   Float?
+  scheduledTime DateTime
+  status        String    @default("ACTIVE") // "ACTIVE" | "SAFE" | "ALERT"
+  notes         String?
+  checkedInAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String   @default("expo") // "expo" | "fcm" | "apns" | "web"
+  createdAt DateTime @default(now())
+}
+
+model AppNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // "NEW_MATCH" | "NEW_MESSAGE" | "SUPER_LIKE" | "COMPLIMENT" | "SAFE_DATE" | "SYSTEM"
+  title     String
+  body      String
+  data      Json?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model Story {
@@ -112,12 +222,12 @@ model Story {
 }
 
 model StoryView {
-  id        String   @id @default(uuid())
-  storyId   String
-  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  viewerId  String
-  viewer    User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
-  viewedAt  DateTime @default(now())
+  id       String   @id @default(uuid())
+  storyId  String
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewerId String
+  viewer   User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  viewedAt DateTime @default(now())
 
   @@unique([storyId, viewerId])
 }
